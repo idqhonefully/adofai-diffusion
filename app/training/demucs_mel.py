@@ -13,11 +13,9 @@
   ch3 = vocals  （人声）
   ch4 = full    （原始混合，整体能量上下文）
   ch5 = accomp  （full - vocals，纯伴奏，去掉人声onset干扰）
-比竞品 HPSS 三通道(percussive/harmonic/full)强得多：分离是按乐器学的，且多一倍信息。
 
-时间分辨率：mel 用 hop=128（≈5.8ms/帧，是 512 的 4 倍细），踩点模型能更准地咬住音头。
-  —— 本 128 全链路版本里，扩散生成(VAE+扩散)也跑在 HOP=128 网格上，
-     因此踩点(128)与落谱(128)同一网格，无需任何换算。
+分离本身的加载/推理/对齐逻辑统一在 separation.py（本文件与 separate_all /
+preview_track 共用），本模块负责：把分离结果转成多通道 log-mel + 磁盘缓存。
 
 对齐保证：所有 stem 重采样到 SR=22050 并裁剪/补齐到与原始音频相同长度，
 因此每条通道 mel 帧数 T 完全一致，能和 chart_repr.adofai_to_dense(hop_ms=5.805) 的真值逐帧对齐。
@@ -36,7 +34,9 @@ ROOT = Path(__file__).resolve().parents[1]  # app/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import paths
 from chart_repr import SR, HOP  # 22050, 128(本路径全局, 踩点+扩散同网格)
+from separation import STEMS, _get_sep, separate_stems, release_sep
 
 N_MELS = 128
 N_FFT = 2048
@@ -44,35 +44,8 @@ N_FFT = 2048
 HOP_ONSET = 128
 HOP_MS_ONSET = 1000.0 * HOP_ONSET / SR          # ≈ 5.805 ms
 
-# 六通道组合（按乐器分离 + 混合/伴奏）
-STEMS = ["drums", "bass", "other", "vocals", "full", "accomp"]
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-CACHE_DIR = os.path.join(ROOT.parent, "data", "demucs_cache")
-
-_SEP = None  # (model, apply_model)
-
-
-def _get_sep(device):
-    global _SEP
-    if _SEP is None:
-        from demucs.pretrained import get_model
-        from demucs.apply import apply_model
-        m = get_model("htdemucs")
-        m.to(device).eval()
-        _SEP = (m, apply_model)
-    return _SEP
-
-
-def release_sep():
-    """分离全部完成后释放 Demucs 模型占用的显存，避免后续训练/推理 OOM。
-
-    笔记本 GPU(如 RTX 4070 8G) 上，htdemucs(~1.2G)若一直驻留显存，
-    紧接着的 OnsetNet 训练在反向传播时就会 CUDA 显存不足。
-    """
-    global _SEP
-    _SEP = None
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+CACHE_DIR = str(paths.DEMUCS_CACHE_DIR)
 
 
 def _cache_path(audio_path):
@@ -104,49 +77,10 @@ def demucs_mel(audio_path, device=None, fallback=True):
         return np.load(cp)
 
     try:
-        # 原始混合 @ 22050 单声道（作为 full/accomp 通道 + 长度基准 L）
-        y_full, _ = librosa.load(audio_path, sr=SR, mono=True)
-        L = len(y_full)
-
-        # 分离输入 @ 44100 立体声（Demucs 要求）
-        y44, _ = librosa.load(audio_path, sr=44100, mono=False)
-        if y44.ndim == 1:
-            y44 = y44[None]
-        if y44.shape[0] == 1:
-            y44 = np.repeat(y44, 2, axis=0)  # (2, N44)
-        y44 = y44.astype(np.float32)
-
-        model, apply_model = _get_sep(device)
-        x = torch.from_numpy(y44).float().to(device)
-        with torch.no_grad():
-            sources = apply_model(model, x[None], device=device, progress=False)[0]  # (nsrc,2,N)
-        names = list(model.sources)  # ['drums','bass','other','vocals']
-
-        # 先把需要的 stem 重采样到 22050 并对齐到 L
-        stem220 = {}
-        for nm in ("drums", "bass", "other", "vocals"):
-            i = names.index(nm)
-            s = sources[i].mean(0).cpu().numpy().astype(np.float32)  # (N,)
-            s = librosa.resample(s, orig_sr=44100, target_sr=SR)     # -> 22050
-            if len(s) > L:
-                s = s[:L]
-            elif len(s) < L:
-                s = np.pad(s, (0, L - len(s)))
-            stem220[nm] = s
-
-        accomp = y_full - stem220["vocals"]           # 纯伴奏（去人声）
-        accomp = np.clip(accomp, -1.0, 1.0)
-
+        stems = separate_stems(audio_path, device=device)   # dict {name: mono22050 (L,)}
         chans = []
         for nm in STEMS:
-            if nm == "full":
-                s = y_full
-            elif nm == "accomp":
-                s = accomp
-            else:
-                s = stem220[nm]
-            chans.append(_one_mel(s))
-
+            chans.append(_one_mel(stems[nm]))
         mel = np.stack(chans, axis=0)  # (6, 128, T)
     except Exception as e:
         if not fallback:

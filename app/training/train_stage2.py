@@ -18,12 +18,13 @@ os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("KMP_AFFINITY", "disabled")
 
+import paths
 from dataset import DenseChartDataset
 from vae import ChartVAE
 from diffusion import DDPM
 
-TRAIN_DIR = os.environ.get("ADOFAI_TRAIN_DIR", "D:/Users/Windows/Desktop/train")
-OUT_DIR = os.environ.get("ADOFAI_DATA_DIR", str(ROOT / "data")) + "/checkpoints"
+TRAIN_DIR = os.environ.get("ADOFAI_TRAIN_DIR", paths.TRAIN_DIR_DEFAULT)
+OUT_DIR = str(paths.CHECKPOINTS_DIR)
 BATCH = 8
 VAE_EPOCHS = int(os.environ.get("VAE_EPOCHS", 60))
 DDPM_EPOCHS = int(os.environ.get("DDPM_EPOCHS", 120))

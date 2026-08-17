@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "app"))
 sys.path.insert(0, str(ROOT / "app" / "training"))
 
+import paths
 import librosa
 from adofai_parse import load_adofai
 from chart_repr import adofai_to_dense, SR, HOP, HOP_MS
@@ -77,10 +78,10 @@ def _f1(pred, gt, tol, hop_ms=HOP_MS_ONSET):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--train_dir", default=r"D:/Users/Windows/Desktop/train")
+    ap.add_argument("--train_dir", default=os.environ.get("ADOFAI_TRAIN_DIR", paths.TRAIN_DIR_DEFAULT))
     ap.add_argument("--n", type=int, default=6, help="评测前 N 首")
     ap.add_argument("--tol", type=int, default=4, help="容差帧数(±, hop128网格≈±23ms)")
-    ap.add_argument("--ckpt", default=str(ROOT / "data" / "checkpoints" / "onset_net_demucs.pt"))
+    ap.add_argument("--ckpt", default=str(paths.CHECKPOINTS_DIR / paths.CKPT_ONSET))
     a = ap.parse_args()
 
     pairs = []

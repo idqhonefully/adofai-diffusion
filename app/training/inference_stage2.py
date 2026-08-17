@@ -20,8 +20,8 @@ os.environ.setdefault("MKL_THREADING_LAYER", "sequential")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("KMP_AFFINITY", "disabled")
-os.environ.setdefault("HF_HUB_OFFLINE", "1")  # Demucs 权重已缓存, 离线加载跳过网络重试
 
+import paths
 import librosa
 from dataset import CHUNK, N_MELS, _mel
 from vae import ChartVAE
@@ -30,7 +30,7 @@ from chart_repr import dense_to_adofai, SR, HOP, HOP_MS
 from onset_net import OnsetNet, predict_onset_frames
 from demucs_mel import demucs_mel, HOP_ONSET, STEMS
 
-CKPT = os.environ.get("ADOFAI_DATA_DIR", str(ROOT / "data")) + "/checkpoints"
+CKPT = str(paths.CHECKPOINTS_DIR)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
@@ -38,6 +38,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 _ONSET_NET = None
+_VAE = None
+_DDPM = None
 
 
 def _load_onset_net():
@@ -56,6 +58,26 @@ def _load_onset_net():
     _ONSET_NET = m
     print(f"[infer] 已加载踩点模型 onset_net.pt（模型踩点, in_channels={len(STEMS)}）")
     return _ONSET_NET
+
+
+def _load_vae():
+    """VAE 常驻缓存（in-process 模式多次推理不重复加载权重）。"""
+    global _VAE
+    if _VAE is None:
+        vae = ChartVAE().to(DEVICE).eval()
+        vae.load_state_dict(torch.load(os.path.join(CKPT, paths.CKPT_VAE), map_location=DEVICE))
+        _VAE = vae
+    return _VAE
+
+
+def _load_ddpm():
+    """DDPM 常驻缓存（in-process 模式多次推理不重复加载权重）。"""
+    global _DDPM
+    if _DDPM is None:
+        ddpm = DDPM().to(DEVICE).eval()
+        ddpm.load_state_dict(torch.load(os.path.join(CKPT, paths.CKPT_DDPM), map_location=DEVICE))
+        _DDPM = ddpm
+    return _DDPM
 
 
 def _detect_onsets(mel_onset):
@@ -89,10 +111,8 @@ def generate(audio, out_path, base_bpm=120.0, steps=50, guidance=2.5, onset_trac
     onsets, onset_prob = _detect_onsets(mel_onset)
     print(f"[infer] audio {Path(audio).name} T={T} frames, 模型(Demucs-OnsetNet) 踩点 onsets={len(onsets)}")
 
-    vae = ChartVAE().to(DEVICE).eval()
-    vae.load_state_dict(torch.load(os.path.join(CKPT, "vae.pt"), map_location=DEVICE))
-    ddpm = DDPM().to(DEVICE).eval()
-    ddpm.load_state_dict(torch.load(os.path.join(CKPT, "ddpm.pt"), map_location=DEVICE))
+    vae = _load_vae()
+    ddpm = _load_ddpm()
 
     # 逐块处理（每块 CHUNK 帧 @128）
     dense_chunks = []

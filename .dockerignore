@@ -1,0 +1,25 @@
+# Python / 环境
+venv/
+venv_*/
+python/
+python313/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# 数据与训练内容（由 compose 挂载 volume，不进镜像）
+data/
+train/**/*.ogg
+train/**/*.mp3
+train/**/*.wav
+train/**/*.adofai
+train/**/*.npy
+
+# 其它生成物
+*.log
+*.out
+*.png
+
+# git
+.git/

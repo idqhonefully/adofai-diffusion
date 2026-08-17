@@ -5,11 +5,15 @@
   {"ok": true, "duration_s": 12.34, "path": "..."}
   {"ok": false, "error": "..."}
 
-必须在 venv 里跑（需要 torch + demucs）。分离复用 demucs_mel._get_sep。
+必须在 torch 环境里跑（需要 demucs）。分离复用 separation.separate_stems。
+
+核心逻辑在 do_preview()：子进程模式（CLI）与 web_server 的 in-process
+模式共用，避免两套实现漂移。
 """
 from __future__ import annotations
 import os, sys, json, argparse
 import numpy as np
+import librosa
 
 ROOT = os.path.dirname(os.path.abspath(__file__))          # app/training/
 APP = os.path.dirname(ROOT)                                # app/
@@ -17,66 +21,24 @@ for p in (APP, ROOT):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-import torch
-import librosa
+from separation import SR, separate_stems, write_wav
 
-SR = 22050
 VALID = ("all", "drums", "bass", "other", "vocals", "accomp")
 
 
-def _separate_stem(audio_path, track):
-    """返回 (stem_22050_mono float32, sr)。逻辑与 demucs_mel.demucs_mel 一致。"""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    from demucs_mel import _get_sep
-
-    if track == "all" or track not in VALID:
-        y, _ = librosa.load(audio_path, sr=SR, mono=True)
-        return y.astype(np.float32), SR
-
-    # Demucs 要求 44100 立体声输入
-    y44, _ = librosa.load(audio_path, sr=44100, mono=False)
-    if y44.ndim == 1:
-        y44 = y44[None]
-    if y44.shape[0] == 1:
-        y44 = np.repeat(y44, 2, axis=0)
-    y44 = y44.astype(np.float32)
-
-    y_full, _ = librosa.load(audio_path, sr=SR, mono=True)
-    L = len(y_full)
-
-    model, apply_model = _get_sep(device)
-    x = torch.from_numpy(y44).float().to(device)
-    with torch.no_grad():
-        sources = apply_model(model, x[None], device=device, progress=False)[0]  # (nsrc,2,N)
-    names = list(model.sources)  # ['drums','bass','other','vocals']
-
-    def get_stem(nm):
-        i = names.index(nm)
-        s = sources[i].mean(0).cpu().numpy().astype(np.float32)
-        s = librosa.resample(s, orig_sr=44100, target_sr=SR)
-        if len(s) > L:
-            s = s[:L]
-        elif len(s) < L:
-            s = np.pad(s, (0, L - len(s)))
-        return s
-
-    if track == "accomp":
-        voc = get_stem("vocals")
-        accomp = np.clip(y_full - voc, -1.0, 1.0)
-        return accomp.astype(np.float32), SR
-    return get_stem(track), SR
-
-
-def _write_wav(path, y, sr):
-    import wave
-    y = np.asarray(y, dtype=np.float32)
-    y = np.clip(y, -1.0, 1.0)
-    data = (y * 32767.0).astype("<i2").tobytes()
-    with wave.open(path, "wb") as w:
-        w.setnchannels(1)
-        w.setsampwidth(2)
-        w.setframerate(sr)
-        w.writeframes(data)
+def do_preview(audio_path, track, out_path):
+    """分离选中音轨并导出 wav。返回 {"ok": true, "duration_s":..., "path":...} 或 {"ok": false, "error":...}。"""
+    try:
+        if track == "all" or track not in VALID:
+            y, _ = librosa.load(audio_path, sr=SR, mono=True)
+            y = y.astype(np.float32)
+        else:
+            stems = separate_stems(audio_path)
+            y = stems[track]
+        write_wav(out_path, y, SR)
+        return {"ok": True, "duration_s": round(len(y) / SR, 2), "path": out_path}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def main():
@@ -85,13 +47,7 @@ def main():
     ap.add_argument("--track", default="all")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
-    try:
-        y, sr = _separate_stem(a.audio, a.track)
-        _write_wav(a.out, y, sr)
-        dur = round(len(y) / sr, 2)
-        print(json.dumps({"ok": True, "duration_s": dur, "path": a.out}))
-    except Exception as e:
-        print(json.dumps({"ok": False, "error": str(e)}))
+    print(json.dumps(do_preview(a.audio, a.track, a.out)))
 
 
 if __name__ == "__main__":

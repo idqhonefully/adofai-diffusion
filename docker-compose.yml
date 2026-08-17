@@ -1,0 +1,27 @@
+services:
+  adofai:
+    build:
+      context: .
+      # 想强制 CPU-only（镜像更小），取消下面注释：
+      # args:
+      #   TORCH_INDEX_URL: https://download.pytorch.org/whl/cpu
+      # 想指定 CUDA 版本（需 NVIDIA 驱动支持），取消下面注释：
+      # args:
+      #   TORCH_INDEX_URL: https://download.pytorch.org/whl/cu121
+    image: adofai-diffusion:latest
+    container_name: adofai-maker
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./data:/app/data      # 权重 checkpoints / demucs 缓存 / 试听文件 / 训练日志
+      - ./train:/app/train    # 训练数据（每首歌一个文件夹：音频 + .adofai）
+    restart: unless-stopped
+
+    # ---- GPU 加速（取消下面整段注释；需宿主机装 nvidia-container-toolkit）----
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

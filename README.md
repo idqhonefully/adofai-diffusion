@@ -18,59 +18,29 @@
 
 > 注：当前版本**不生成**运镜/变色/闪光等视觉特效，只做"脚步"（踩点 + 旋转）。后续更新会先在群内测试再开源
 
----
-
-## 目录结构
-
-```
-adofai-diffusion/
-├── run.bat              # Windows 一键启动（首次会自动建环境装依赖）
-├── requirements.txt     # Python 依赖清单
-├── README.md            # 本文件（中文）
-├── README_EN.md         # 英文文档
-├── LICENSE              # MIT 许可证
-├── .gitignore
-├── train/               # 放你自己的训练数据（结构见 train/README.md），不进 git
-└── app/
-    ├── web_server.py        # 网页后端（生成 + 训练两个页签）
-    ├── adofai_parse.py      # 读取/解析 .adofai 谱面
-    ├── onset_detector.py    # 频谱分析 + 预览图（音频解码用 ffmpeg）
-    ├── timing_engine.py     # 计时引擎（角度 <-> 时间，支持 Twirl/SetSpeed 等）
-    ├── validate_beat_align.py # 校验踩点对齐
-    ├── webui/
-    │   └── index.html       # 前端页面（选音频 → 选音轨 → 生成）
-    └── training/
-        ├── inference_stage2.py  # 生成主流程：音频 → 踩点 + 扩散 → .adofai
-        ├── onset_net.py         # 踩点模型 OnsetNet 定义
-        ├── train_onset.py       # 训练踩点模型
-        ├── dataset.py           # 扩散训练数据集（读 train/ 配对）
-        ├── train_stage2.py      # 训练 VAE + 扩散（风格模型）
-        ├── vae.py / diffusion.py# VAE 与 DDPM 扩散模型定义
-        ├── chart_repr.py        # 谱面 <-> 稠密表示的互相转换
-        ├── demucs_mel.py        # 用 Demucs 做音源分离 + 梅尔特征
-        ├── separate_all.py      # 分离全部音轨（网页"分解音频"用）
-        ├── preview_track.py     # 导出单条分离音轨供试听
-        └── eval_onset.py        # 踩点模型评测
-```
+<img width="600" height="600" alt="image" src="https://github.com/user-attachments/assets/84e4fb65-1ff4-43f2-8d3b-f80c11d1b6e1" />
 
 ---
 
-## 环境要求
+## 快速开始
 
-- **操作系统**：Windows（已测）。其它系统理论上也能跑，但 `run.bat` 是 Windows 专用，需自己用等价命令起服务。
-- **Python**：3.12 或更新（开发用 3.12/3.13）。
-- **显卡**：推荐 NVIDIA 独显（训练必须用 GPU）。仅推理可以 CPU 跑，但慢。
-- **首次运行需要联网**：要下载 Python 依赖和 Demucs 的分离模型权重。之后可离线。
+### 方式一：离线整合包（最省事，推荐）
 
----
+懒得装 Python / CUDA / 训模型？有一个**开箱即用的离线整合包**——一个自带运行时的单文件压缩包（约 3.3 GB），里面已经打包好了 Python、CUDA 版 PyTorch、Demucs 分离权重，以及用我的数据训好的三个模型权重。解压双击 `run.bat` 就能用。
 
-## 快速开始（最省事）
+- **需要**：Windows + NVIDIA 独显（整合包里是 CUDA 版 torch，没有 CPU 兜底）。
+- **获取方式**：加 QQ 群 `1027673321`，在群文件里下载。
+- 解压后进 `new_last_128_piano/portable/`，双击 `run.bat`，浏览器自动开 `http://127.0.0.1:8081`。
+
+> 本仓库开源的源码就是同一套管线；整合包只是额外把运行时 + 训好的权重塞进去，让不懂编程的人也能直接用。
+
+### 方式二：源码 + `run.bat`（Windows）
 
 1. 把整个 `adofai-diffusion` 文件夹拷到你的电脑。
 2. 双击 **`run.bat`**。
    - 第一次会先建一个虚拟环境、自动 `pip install` 装好所有依赖（可能要等几分钟，取决于网速）。
    - 装完后浏览器会自动打开 `http://127.0.0.1:8081`。
-3. 打开网页后，**先去"训练模型"页把模型训出来**（见下），否则生成会因为没有权重而失败。
+3. 打开网页后，**先去"训练模型"页把模型训出来**（见下文），否则生成会因为没有权重而失败。
 
 > 如果你是自己从源码跑（不用 `run.bat`）：
 > ```
@@ -79,6 +49,32 @@ adofai-diffusion/
 > pip install -r requirements.txt
 > python app/web_server.py --port 8081
 > ```
+
+### 方式三：Docker（Linux / 服务器）
+
+仓库自带 `Dockerfile` + `docker-compose.yml`，支持 CPU 和 GPU：
+
+```bash
+# 在仓库根目录
+docker compose up -d --build
+```
+
+浏览器打开 <http://localhost:8081>。训练数据通过 volume 挂载在宿主机 `./train` / `./data`，不会丢。
+
+> 详细的 Docker 部署（GPU 加速、数据目录、常见问题）见 **[DOCKER.md](DOCKER.md)**。
+
+---
+
+## 生成谱面（三步）
+
+1. **第一步 · 选音频**：在网页"生成"页拖入或选择一首歌。
+2. **第二步 · 选分解后的音轨**：点「分解音频」，等它把歌拆成 5 条（鼓点/贝斯/旋律钢琴/人声/伴奏去人声），每条带试听播放条和复选框（建议用原音频）。
+   - 勾「原音频」就禁用所有分解轨；勾任意分解轨就禁用「原音频」（互斥）。
+   - 分解轨可以**多选**。
+3. **第三步 · 生成**：
+   - 选原音频 / 单个音轨 → 直接交给 AI 推理。
+   - 选多个音轨 → 自动合并成一个音频再交给 AI。
+   - 生成完成后可下载 `.adofai` 和梅尔频谱预览图。
 
 ---
 
@@ -121,39 +117,7 @@ REM 训风格模型（VAE + 扩散）
 venv\Scripts\python.exe app\training\train_stage2.py
 ```
 
----
-
-## 生成谱面（三步）
-
-1. **第一步 · 选音频**：在网页"生成"页拖入或选择一首歌。
-2. **第二步 · 选分解后的音轨**：点「分解音频」，等它把歌拆成 5 条（鼓点/贝斯/旋律钢琴/人声/伴奏去人声），每条带试听播放条和复选框（建议用原音频）。
-   - 勾「原音频」就禁用所有分解轨；勾任意分解轨就禁用「原音频」（互斥）。
-   - 分解轨可以**多选**。
-3. **第三步 · 生成**：
-   - 选原音频 / 单个音轨 → 直接交给 AI 推理。
-   - 选多个音轨 → 自动合并成一个音频再交给 AI。
-   - 生成完成后可下载 `.adofai` 和梅尔频谱预览图。
-
----
-
-## 关于模型权重
-
-代码**不包含**训练好的权重（`onset_net.pt` / `vae.pt` / `ddpm.pt`）。
-原因：权重是从训练数据学出来的，而训练数据（歌曲 + 谱面）有版权，不适合随代码公开。
-请按上面的"训练"步骤用自己的数据训出来；训好后放 `data/checkpoints/` 即可。
-
----
-
-## 想要现成的离线整合包（不用自己配环境）
-
-懒得装 Python / CUDA / 训模型？有一个**开箱即用的离线整合包**——一个自带运行时的单文件压缩包（约 3.3 GB），里面已经打包好了 Python、CUDA 版 PyTorch、Demucs 分离权重，以及用我的数据训好的三个模型权重。解压双击 `run.bat` 就能用。
-
-- **需要**：Windows + NVIDIA 独显（整合包里是 CUDA 版 torch，没有 CPU 兜底）。
-- **获取方式**：加我们的 QQ 群，在群文件里下载：
-  - **QQ 群：`1027673321`**
-- 解压后进 `new_last_128_piano/portable/`，双击 `run.bat`，浏览器自动开 `http://127.0.0.1:8081`。
-
-> 本仓库开源的源码就是同一套管线；整合包只是额外把运行时 + 训好的权重塞进去，让不懂编程的人也能直接用。
+> 训练数据目录的具体结构见 [train/README.md](train/README.md)。
 
 ---
 
@@ -173,6 +137,67 @@ A：训练/推理都在吃显卡。没独显用 CPU 会非常慢。
 
 **Q：能加运镜/特效吗？**
 A：当前版本只做踩点和旋转，不含视觉特效。属于后续增强。
+
+**Q：Docker 里报「未找到模型运行环境（venv 缺失）」？**
+A：旧代码硬编码了 Windows 的 venv 路径；现在已自动识别 Linux `venv/bin/python`。容器内默认 `--in-process` 常驻模式，不走 venv，详见 [DOCKER.md](DOCKER.md)。
+
+---
+
+## 技术细节
+
+### 环境要求
+
+- **操作系统**：Windows（已测）。其它系统理论上也能跑，但 `run.bat` 是 Windows 专用，需自己用等价命令起服务（或直接用 Docker）。
+- **Python**：3.12 或更新（开发用 3.12/3.13）。
+- **显卡**：推荐 NVIDIA 独显（训练必须用 GPU）。仅推理可以 CPU 跑，但慢。
+- **首次运行需要联网**：要下载 Python 依赖和 Demucs 的分离模型权重。之后可离线。
+
+### 目录结构
+
+```
+adofai-diffusion/
+├── run.bat                # Windows 一键启动（首次会自动建环境装依赖）
+├── Dockerfile             # Docker 镜像构建
+├── docker-compose.yml     # Docker 编排（CPU/GPU，volume 挂载 data/ 与 train/）
+├── DOCKER.md              # Docker 部署文档
+├── requirements.txt       # Python 依赖清单
+├── requirements-dev.txt   # 开发/测试依赖
+├── README.md              # 本文件（中文）
+├── README_EN.md           # 英文文档
+├── LICENSE                # MIT 许可证
+├── .gitignore
+├── train/                 # 放你自己的训练数据（结构见 train/README.md），不进 git
+├── tests/                 # 单元测试（test_chart_repr / test_paths / test_timing_engine）
+└── app/
+    ├── web_server.py          # 网页后端（生成 + 训练两个页签）
+    ├── adofai_parse.py        # 读取/解析 .adofai 谱面
+    ├── onset_detector.py      # 频谱分析 + 预览图（音频解码用 ffmpeg）
+    ├── paths.py               # 路径管理（数据/检查点/缓存目录）
+    ├── timing_engine.py       # 计时引擎（角度 <-> 时间，支持 Twirl/SetSpeed 等）
+    ├── validate_beat_align.py # 校验踩点对齐
+    ├── webui/
+    │   ├── index.html         # 前端页面（选音频 → 选音轨 → 生成）
+    │   └── styles.css         # 前端样式
+    └── training/
+        ├── inference_stage2.py  # 生成主流程：音频 → 踩点 + 扩散 → .adofai
+        ├── onset_net.py         # 踩点模型 OnsetNet 定义
+        ├── train_onset.py       # 训练踩点模型
+        ├── dataset.py           # 扩散训练数据集（读 train/ 配对）
+        ├── train_stage2.py      # 训练 VAE + 扩散（风格模型）
+        ├── vae.py / diffusion.py# VAE 与 DDPM 扩散模型定义
+        ├── chart_repr.py        # 谱面 <-> 稠密表示的互相转换
+        ├── demucs_mel.py        # 用 Demucs 做音源分离 + 梅尔特征
+        ├── separation.py        # 音轨分离（多选合并等逻辑）
+        ├── separate_all.py      # 分离全部音轨（网页"分解音频"用）
+        ├── preview_track.py     # 导出单条分离音轨供试听
+        └── eval_onset.py        # 踩点模型评测
+```
+
+### 关于模型权重
+
+代码**不包含**训练好的权重（`onset_net.pt` / `vae.pt` / `ddpm.pt`）。
+原因：权重是从训练数据学出来的，而训练数据（歌曲 + 谱面）有版权，不适合随代码公开。
+请按上面的"训练"步骤用自己的数据训出来；训好后放 `data/checkpoints/` 即可。
 
 ---
 

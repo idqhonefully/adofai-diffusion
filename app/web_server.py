@@ -28,6 +28,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+import paths
 from onset_detector import SR, HOP_LENGTH, detect_onsets, _ffmpeg_exe
 
 SERVER_REF = [None]
@@ -36,15 +37,38 @@ MAX_AUDIO_BYTES = 1 * 1024 ** 3
 
 # 模型路线（VAE+扩散 / OnsetNet）依赖 torch，跑在 venv 里；网页后端用自带 python 跑。
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-PORTABLE_ROOT = os.path.dirname(APP_DIR)
-VENV_PY = os.path.join(PORTABLE_ROOT, "venv", "Scripts", "python.exe")
+PORTABLE_ROOT = str(paths.ROOT)
+# venv 解释器路径：Windows 在 venv/Scripts/python.exe，POSIX 在 venv/bin/python。
+# 容器部署可设环境变量 ADOFAI_VENV_PY 直接指到同一套 python（不必真的建 venv）。
+def _venv_python():
+    env = os.environ.get("ADOFAI_VENV_PY")
+    if env:
+        return env
+    return paths.venv_python(PORTABLE_ROOT)
+
+VENV_PY = _venv_python()
 INFER_SCRIPT = os.path.join(PORTABLE_ROOT, "app", "training", "inference_stage2.py")
-TRAIN_LOG = os.path.join(PORTABLE_ROOT, "data", "train.log")
-PREVIEW_DIR = os.path.join(PORTABLE_ROOT, "data", "preview")
-os.makedirs(PREVIEW_DIR, exist_ok=True)
+TRAIN_LOG = str(paths.TRAIN_LOG)
+PREVIEW_DIR = str(paths.PREVIEW_DIR)
+paths.ensure_dirs()
 
 # ---------- 训练状态机 ----------
 TRAIN_STATE = {"proc": None, "kind": None, "started": 0.0, "status": "idle", "phase": ""}
+
+# ---------- 运行模式 ----------
+# in-process：推理/分离在 web_server 进程内常驻运行（需 torch，模型只加载一次）。
+# 容器/常驻部署建议开启；Windows 子进程模式（默认）行为与旧版完全一致。
+IN_PROCESS = bool(os.environ.get("ADOFAI_IN_PROCESS", ""))
+
+
+def _load_training_module(name):
+    """懒加载 app/training 下的模块（in-process 用；避免启动 web_server 就必须有 torch）。"""
+    import importlib
+    training_dir = os.path.join(APP_DIR, "training")
+    for p in (APP_DIR, training_dir):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    return importlib.import_module(name)
 
 
 def _resource(rel):
@@ -116,7 +140,6 @@ def _training_worker(commands, kind):
             "MKL_THREADING_LAYER": "sequential", "MKL_NUM_THREADS": "1",
             "OMP_NUM_THREADS": "1", "KMP_AFFINITY": "disabled",
             "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_MAX_THREADS": "1",
-            "HF_HUB_OFFLINE": "1",   # Demucs 权重已缓存, 离线加载跳过网络重试
             "PYTHONUNBUFFERED": "1",  # 强制子进程无缓冲, 训练日志实时落盘(避免静默假死错觉)
         })
         if use_cpu:
@@ -206,8 +229,8 @@ def plot_onsets_bytes(logmel, times):
 
 
 def generate_chart_model(audio_bytes, filename, params):
-    """AI 模型路线：音频 -> OnsetNet+VAE+扩散 -> .adofai（用 venv 里的 torch 跑真实权重）。"""
-    if not os.path.exists(VENV_PY):
+    """AI 模型路线：音频 -> OnsetNet+VAE+扩散 -> .adofai（in-process 常驻 or venv 子进程）。"""
+    if not IN_PROCESS and not os.path.exists(VENV_PY):
         return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。请确认 portable/venv 存在。"}
     base_bpm = 120.0
     bpm_raw = params.get("bpm")
@@ -256,27 +279,13 @@ def _venv_env():
         "MKL_THREADING_LAYER": "sequential", "MKL_NUM_THREADS": "1",
         "OMP_NUM_THREADS": "1", "KMP_AFFINITY": "disabled",
         "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_MAX_THREADS": "1",
-        "HF_HUB_OFFLINE": "1",
     })
     return env
 
 
 def _run_stem_separate(wav_path, track, out_path):
-    """用 venv 分离单条音轨，返回 {ok, error?}。"""
-    if not os.path.exists(VENV_PY):
-        return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。"}
-    try:
-        proc = subprocess.run(
-            [VENV_PY, os.path.join(PORTABLE_ROOT, "app", "training", "preview_track.py"),
-             "--audio", wav_path, "--track", str(track), "--out", out_path],
-            env=_venv_env(), capture_output=True, text=True, timeout=600)
-    except Exception as e:
-        return {"ok": False, "error": f"分离进程启动失败：{e}"}
-    out = (proc.stdout or "").strip()
-    try:
-        r = json.loads(out)
-    except Exception:
-        return {"ok": False, "error": f"分离失败：{(proc.stderr or out)[:400]}"}
+    """分离单条音轨（推理输入用），返回 {ok, error?}。"""
+    r = _run_preview_track(wav_path, track, out_path)
     if not r.get("ok"):
         return {"ok": False, "error": r.get("error", "分离失败")}
     if not os.path.exists(out_path):
@@ -285,7 +294,13 @@ def _run_stem_separate(wav_path, track, out_path):
 
 
 def _run_separate_all(wav_path, prefix):
-    """用 venv 一次分离全部音轨到 PREVIEW_DIR，返回 {ok, stems:[...], error?}。"""
+    """一次分离全部音轨到 PREVIEW_DIR，返回 {ok, stems:[...], error?}。"""
+    if IN_PROCESS:
+        try:
+            m = _load_training_module("separate_all")
+            return m.do_separate(wav_path, PREVIEW_DIR, prefix)
+        except Exception as e:
+            return {"ok": False, "error": f"分离失败：{e}"}
     if not os.path.exists(VENV_PY):
         return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。"}
     try:
@@ -302,6 +317,38 @@ def _run_separate_all(wav_path, prefix):
         return {"ok": False, "error": f"分离失败：{(proc.stderr or out)[:400]}"}
     if not r.get("ok"):
         return {"ok": False, "error": r.get("error", "分离失败")}
+    return r
+
+
+def _run_preview_track(wav_path, track, out_path):
+    """分离单条音轨到 out_path，返回 {ok, duration_s?, error?}。"""
+    if IN_PROCESS:
+        try:
+            m = _load_training_module("preview_track")
+            return m.do_preview(wav_path, str(track), out_path)
+        except Exception as e:
+            return {"ok": False, "error": f"分离失败：{e}"}
+    if not os.path.exists(VENV_PY):
+        return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。"}
+    env = dict(os.environ)
+    env.update({
+        "PYTHONNOUSERSITE": "1",
+        "MKL_THREADING_LAYER": "sequential", "MKL_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "1", "KMP_AFFINITY": "disabled",
+        "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_MAX_THREADS": "1",
+    })
+    try:
+        proc = subprocess.run(
+            [VENV_PY, os.path.join(PORTABLE_ROOT, "app", "training", "preview_track.py"),
+             "--audio", wav_path, "--track", str(track), "--out", out_path],
+            env=env, capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        return {"ok": False, "error": f"分离进程启动失败：{e}"}
+    out = (proc.stdout or "").strip()
+    try:
+        r = json.loads(out)
+    except Exception:
+        return {"ok": False, "error": f"分离失败：{(proc.stderr or out)[:400]}"}
     return r
 
 
@@ -359,12 +406,18 @@ def _resolve_infer_input(tmpdir, wav_path, selected, adofai_path):
     return merged, "all"
 
 
-def run_inference(wav_path, track, difficulty, base_bpm, adofai_path, filename):
-    """给定已解码 wav 与 track，跑 OnsetNet+VAE/扩散 -> .adofai。"""
-    try:
-        times_s, flux, logmel = detect_onsets(wav_path)
-    except Exception as e:
-        return {"ok": False, "error": f"频谱分析失败：{e}"}
+def _infer_model(wav_path, track, base_bpm, adofai_path):
+    """生成 .adofai（in-process 常驻 or venv 子进程）。返回 (ok, err_or_none)。"""
+    if IN_PROCESS:
+        try:
+            m = _load_training_module("inference_stage2")
+            level = m.generate(wav_path, adofai_path, base_bpm=base_bpm,
+                               steps=50, guidance=2.5, onset_track=track)
+            if level is None:
+                return False, "dense_to_adofai 返回 None（踩点不足）"
+            return True, None
+        except Exception as e:
+            return False, f"模型推理失败：{e}"
     try:
         proc = subprocess.run(
             [VENV_PY, INFER_SCRIPT, "--audio", wav_path, "--out", adofai_path,
@@ -372,9 +425,20 @@ def run_inference(wav_path, track, difficulty, base_bpm, adofai_path, filename):
              "--track", str(track)],
             env=_venv_env(), capture_output=True, text=True, timeout=900)
     except Exception as e:
-        return {"ok": False, "error": f"模型推理进程启动失败：{e}"}
+        return False, f"模型推理进程启动失败：{e}"
     if not os.path.exists(adofai_path):
-        err = (proc.stderr or proc.stdout or "")[:600]
+        return False, (proc.stderr or proc.stdout or "")[:600]
+    return True, None
+
+
+def run_inference(wav_path, track, difficulty, base_bpm, adofai_path, filename):
+    """给定已解码 wav 与 track，跑 OnsetNet+VAE/扩散 -> .adofai。"""
+    try:
+        times_s, flux, logmel = detect_onsets(wav_path)
+    except Exception as e:
+        return {"ok": False, "error": f"频谱分析失败：{e}"}
+    ok, err = _infer_model(wav_path, track, base_bpm, adofai_path)
+    if not ok:
         if track != "all":
             return {"ok": False, "error": f"生成失败（所选音轨「{track}」在该曲中较弱或稀疏，踩点不足，试试选「全部混合」或其他音轨）：{err}"}
         return {"ok": False, "error": f"模型未生成谱面（权重可能未训练或踩点不足）：{err}"}
@@ -413,7 +477,7 @@ def run_inference(wav_path, track, difficulty, base_bpm, adofai_path, filename):
 
 def separate_all(audio_bytes, filename):
     """分离全部音轨，返回各分解音轨的可播放 url 列表（不需要训练好的权重）。"""
-    if not os.path.exists(VENV_PY):
+    if not IN_PROCESS and not os.path.exists(VENV_PY):
         return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。"}
     tmpdir = tempfile.mkdtemp(prefix="adofai_sep_")
     ext = os.path.splitext(filename)[1].lower() or ".mp3"
@@ -445,7 +509,7 @@ def separate_all(audio_bytes, filename):
 
 def preview_track(audio_bytes, filename, track):
     """分离选中音轨并导出可播放 wav，供网页试听（不需要训练好的 onset/vae/ddpm 权重）。"""
-    if not os.path.exists(VENV_PY):
+    if not IN_PROCESS and not os.path.exists(VENV_PY):
         return {"ok": False, "error": "未找到模型运行环境（venv 缺失）。"}
     track = track or "all"
     tmpdir = tempfile.mkdtemp(prefix="adofai_prev_")
@@ -470,26 +534,7 @@ def preview_track(audio_bytes, filename, track):
     if not os.path.exists(wav_path):
         return {"ok": False, "error": "音频解码后未生成 wav。"}
 
-    env = dict(os.environ)
-    env.update({
-        "PYTHONNOUSERSITE": "1",
-        "MKL_THREADING_LAYER": "sequential", "MKL_NUM_THREADS": "1",
-        "OMP_NUM_THREADS": "1", "KMP_AFFINITY": "disabled",
-        "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_MAX_THREADS": "1",
-        "HF_HUB_OFFLINE": "1",
-    })
-    try:
-        proc = subprocess.run(
-            [VENV_PY, os.path.join(PORTABLE_ROOT, "app", "training", "preview_track.py"),
-             "--audio", wav_path, "--track", str(track), "--out", out_path],
-            env=env, capture_output=True, text=True, timeout=600)
-    except Exception as e:
-        return {"ok": False, "error": f"分离进程启动失败：{e}"}
-    out = (proc.stdout or "").strip()
-    try:
-        r = json.loads(out)
-    except Exception:
-        return {"ok": False, "error": f"分离失败：{(proc.stderr or out)[:400]}"}
+    r = _run_preview_track(wav_path, track, out_path)
     if not r.get("ok"):
         return {"ok": False, "error": r.get("error", "分离失败")}
     if not os.path.exists(out_path):
@@ -683,11 +728,18 @@ def open_browser(url, health_url):
 def main():
     import argparse
     ap = argparse.ArgumentParser()
+    ap.add_argument("--host", default="127.0.0.1", help="监听地址（容器部署用 0.0.0.0）")
     ap.add_argument("--port", type=int, default=0, help="固定端口(默认随机空闲端口)")
     ap.add_argument("--no-browser", action="store_true", help="不起浏览器(仅服务)")
+    ap.add_argument("--in-process", action="store_true",
+                    help="推理/分离在进程内常驻运行（需 torch；容器/常驻部署建议开启）")
     args = ap.parse_args()
 
-    srv = Server(("127.0.0.1", args.port or 0), Handler)
+    global IN_PROCESS
+    if args.in_process:
+        IN_PROCESS = True
+
+    srv = Server((args.host, args.port or 0), Handler)
     SERVER_REF[0] = srv
     port = srv.server_address[1]
     url = f"http://127.0.0.1:{port}/"

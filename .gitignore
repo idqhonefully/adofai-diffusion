@@ -28,6 +28,19 @@ train/**/*.npy
 *.mp3
 *.png
 
+# 模型权重（体积大，不进仓库）
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+
+# 环境变量 / 密钥
+.env
+.env.*
+!.env.example
+
 # --- 日志 ---
 *.log
 *.out

@@ -24,9 +24,9 @@ os.environ.setdefault("MKL_THREADING_LAYER", "sequential")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("KMP_AFFINITY", "disabled")
-os.environ.setdefault("HF_HUB_OFFLINE", "1")  # Demucs 权重已缓存, 离线加载跳过网络重试
 torch.set_num_threads(1)
 
+import paths
 import librosa
 from adofai_parse import load_adofai
 from chart_repr import adofai_to_dense, SR, HOP
@@ -116,13 +116,13 @@ class OnsetDataset(td.Dataset):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--train_dir", default=os.environ.get("ADOFAI_TRAIN_DIR",
-                        r"D:/Users/Windows/Desktop/train"))
+                        paths.TRAIN_DIR_DEFAULT))
     ap.add_argument("--epochs", type=int, default=80)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument("--chunk", type=int, default=1024)
     ap.add_argument("--stride", type=int, default=512)
-    ap.add_argument("--out", default=str(ROOT / "data" / "checkpoints" / "onset_net.pt"))
+    ap.add_argument("--out", default=str(paths.CHECKPOINTS_DIR / paths.CKPT_ONSET))
     a = ap.parse_args()
 
     print(f"[cfg] device={DEVICE}  train_dir={a.train_dir}")
