@@ -36,7 +36,7 @@ def _new_chart(angle):
     }
 
 
-def compute_note_times(angle_data, settings, actions, add_offset=False):
+def compute_note_times(angle_data, settings, actions, add_offset=False, return_directions=False):
     """
     忠实移植 SharpFAI LevelUtils.GetNoteTimes。
 
@@ -77,6 +77,10 @@ def compute_note_times(angle_data, settings, actions, add_offset=False):
     for ev in actions:
         et = ev.get('eventType')
         fl = ev.get('floor', 0)
+        # 与真实 ADOFAI 计时引擎一致：floor F 的 Twirl 翻转的是「离开 F 进入 F+1」
+        # 那段的转向，即引擎里索引 F 的 tile 方向，故事件落在 parsed[fl]（0-based）。
+        # （2026-08-16 修正：v9 误改成 parsed[fl-1] 导致每个 Twirl 整体错后一格，
+        # 表现为「开头旋转多一个/少一个、后面全反」。已还原为 0-based。）
         if not (0 <= fl < len(parsed)):
             continue
         ob = parsed[fl]
@@ -114,6 +118,7 @@ def compute_note_times(angle_data, settings, actions, add_offset=False):
 
     # ---- 时间累加 ----
     note_time = []
+    directions = []
     cur_angle = 0.0
     cur_time = 0.0
     is_multi = False
@@ -140,9 +145,12 @@ def compute_note_times(angle_data, settings, actions, add_offset=False):
         cur_time += delta
         cur_angle = dest
         note_time.append((cur_time, ob['extraHold'] > 0))
+        directions.append(ob['direction'])
 
     if add_offset:
         note_time = [(t + offset, h) for (t, h) in note_time]
+    if return_directions:
+        return note_time, directions
     return note_time
 
 

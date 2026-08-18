@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ADOFAI Maker · 128 全链路</title>
+<title>ADOFAI Diffusion</title>
+<link rel="icon" href="icon.png" type="image/png">
 <style>
   :root{
     --bg:#0f1220; --panel:#181c2e; --panel2:#1f2440; --line:#2c3358;
@@ -23,7 +24,7 @@
     border:1px solid var(--line);border-bottom:none;color:var(--muted);font-weight:600}
   .tab.active{background:var(--panel);color:var(--txt)}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
-  #genView[hidden],#trainView[hidden]{display:none}
+  #genView[hidden],#trainView[hidden],#vfxView[hidden]{display:none}
   #drop{border:2px dashed var(--line);border-radius:12px;padding:26px;text-align:center;cursor:pointer;transition:.15s;background:var(--panel2)}
   #drop.over{border-color:var(--accent);background:#20264a}
   #drop .big{font-size:15px}
@@ -56,6 +57,14 @@
   .badge.idle{background:#2a2f4a;color:var(--muted)}
   .badge.err{background:#3a1d24;color:var(--danger)}
   .badge.done{background:#1d3a2e;color:var(--ok)}
+  /* 模型就绪状态徽章 */
+  .model-status{display:flex;gap:10px;flex-wrap:wrap;margin:2px 0 10px}
+  .chip{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);font-size:13px}
+  .chip .nm{color:var(--txt);font-weight:600}
+  .chip .st{font-size:12px;font-weight:700}
+  .chip .sz{color:var(--muted);font-size:11px}
+  .chip.ok{border-color:var(--ok)} .chip.ok .st{color:var(--ok)}
+  .chip.miss{border-color:var(--danger)} .chip.miss .st{color:var(--danger)}
   footer{color:var(--muted);font-size:11px;text-align:center;padding:10px}
   a.link{color:var(--accent)}
   .note{background:#16203a;border-left:3px solid var(--accent);padding:10px 12px;border-radius:8px;
@@ -64,18 +73,35 @@
   .stem-row{display:flex;flex-direction:column;gap:6px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:10px;background:var(--panel2)}
   .stem-label{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--txt);cursor:pointer}
   .stem-label input{width:16px;height:16px;cursor:pointer}
+  /* 弹窗 */
+  .modal{position:fixed;inset:0;background:rgba(5,8,20,.66);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+  .modal[hidden]{display:none}
+  .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:16px;max-width:660px;width:100%;max-height:86vh;overflow:auto;padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal-h{font-size:17px;font-weight:700;color:var(--txt);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .modal-body{font-size:13px;line-height:1.8;color:var(--muted)}
+  .modal-body h4{color:var(--txt);margin:16px 0 6px;font-size:14px}
+  .modal-body b{color:var(--accent2)}
+  .modal-body code{background:var(--panel2);padding:1px 6px;border-radius:6px;color:var(--txt)}
+  .modal-body p{margin:8px 0}
+  /* 训练进度条 */
+  .progress-wrap{margin-top:12px}
+  .progress-bar{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .progress-fill{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .4s}
+  .progress-txt{color:var(--muted);font-size:12px;margin-top:6px}
 </style>
 </head>
 <body>
 <header>
-  <h1>ADOFAI Maker<span class="dot"> ●</span></h1>
-  <p>本地谱面生成 · 128 全链路（Demucs 6 通道踩点 + VAE/扩散加事件，hop=128 同网格）</p>
+  <h1>ADOFAI Diffusion<span class="dot"> ●</span></h1>
+  <p>本地谱面生成（Demucs 6 通道踩点 + OnsetNet + VAE/扩散加事件/特效）</p>
 </header>
 
 <main>
   <div class="tabs">
     <div class="tab active" id="tabGen" onclick="switchTab('gen')">生成谱面</div>
+    <div class="tab" id="tabShape" onclick="switchTab('shape')">训练轨道模型</div>
     <div class="tab" id="tabTrain" onclick="switchTab('train')">训练模型</div>
+    <div class="tab" id="tabVfx" onclick="switchTab('vfx')">训练视觉特效</div>
   </div>
 
   <!-- ============ 生成（三步流程） ============ -->
@@ -94,7 +120,7 @@
     <!-- 第二步：选音轨 -->
     <div class="card">
       <div class="step-h">第二步 · 选择分解后的音轨</div>
-      <div class="hint" style="margin-bottom:10px">先分解音频，再勾选要用的音轨。<b>原音频</b>与<b>分解音轨互斥</b>（只能选一类）；分解音轨可<b>多选</b>，选多条会合并后交给 AI。</div>
+      <div class="hint" style="margin-bottom:10px"><b>原音频</b>可直接勾选后生成（无需分解，省时间）；想分离音轨则点「分解音频」再勾选。<b>原音频与分解音轨互斥</b>（只能选一类）；分解音轨可<b>多选</b>，选多条会合并后交给 AI。</div>
       <div class="row">
         <button id="sepBtn" class="ghost" disabled>▶ 分解音频</button>
         <span id="sepStatus" class="hint"></span>
@@ -102,9 +128,19 @@
       <div id="stemList" style="margin-top:14px"></div>
     </div>
 
-    <!-- 第三步：生成 -->
+    <!-- 第三步：视觉特效（VFX，可选） -->
     <div class="card">
-      <div class="step-h">第三步 · 生成谱面</div>
+      <div class="step-h">第三步 · 视觉特效（可选）</div>
+      <div class="hint" style="margin-bottom:10px">在已成谱面上叠加纯视觉特效（闪光 Flash / 泛光 Bloom / 镜头 MoveCamera / 滤镜 SetFilter / 变色 RecolorTrack）。特效与<b>音乐结构强相关</b>（节拍/掉落/乐句），由 VFXNet 预测。需先完成 VFXNet 训练（见「训练视觉特效」页）。</div>
+      <div class="row" style="margin-bottom:10px;justify-content:space-between">
+        <label class="stem-label"><input id="vfx_on" type="checkbox"> 生成时加入视觉特效</label>
+      </div>
+      <div class="note" id="vfxPending" style="margin-top:10px"></div>
+    </div>
+
+    <!-- 第四步：生成 -->
+    <div class="card">
+      <div class="step-h">第四步 · 生成谱面</div>
       <div class="grid">
         <div class="ctrl">
           <label>难度（difficulty） <b id="difficulty_v">1</b></label>
@@ -113,8 +149,8 @@
         </div>
         <div class="ctrl">
           <label>BPM（自定义速度）</label>
-          <input id="bpm" type="number" min="1" max="1000" step="0.1" placeholder="留空=默认 120">
-          <div class="hint">填你认定的 BPM；模型踩点不依赖 BPM，这里只影响落谱时长标度</div>
+          <input id="bpm" type="number" min="1" max="1000" step="0.1" placeholder="留空=自动检测 BPM">
+          <div class="hint">填你认定的 BPM 即严格使用（不会被覆盖）；留空才自动检测。模型踩点不依赖 BPM，这里只决定落谱速度标度</div>
         </div>
       </div>
       <div class="row" style="margin-top:12px">
@@ -122,7 +158,8 @@
         <span id="status"></span>
       </div>
       <div id="err" class="err"></div>
-      <div class="note">⚠️ 首次使用前必须先去「训练模型」页训练权重。未训练时这里会失败（缺少 onset_net.pt / vae.pt / ddpm.pt）。</div>
+      <div id="modelStatus" class="model-status"></div>
+      <div id="modelSummary" class="note"></div>
     </div>
 
     <div id="results" class="card" hidden>
@@ -137,6 +174,32 @@
     <div class="card">
       <button id="exit" class="ghost">退出程序</button>
       <span class="hint" style="margin-left:10px">生成原理：音频经 Demucs 分离成 6 通道 → OnsetNet 踩点（128 网格）→ VAE/扩散生成风格层（Twirl/转角）→ 转换器按「间隔×180/拍长」算角度落谱。</span>
+    </div>
+  </section>
+
+  <!-- ============ 训练轨道模型 ShapeModel ============ -->
+  <section id="shapeView" hidden>
+    <div class="card">
+      <div class="note">
+        <b>ShapeModel（摆轨道走线模型）</b>：学习你谱面的「左右走线 / 拐弯形态」，接管生成时的行进方向（Twirl 反转）。
+        训练数据目录同「训练模型」页：每个子文件夹一首歌（<code>歌名.ogg</code> + <code>歌名.adofai</code> 配对）。
+        模型产出权重 <code>data/checkpoints/shape_model.pt</code>。
+      </div>
+      <div class="note" style="margin-top:10px">
+        ⚠️ 启动训练请在专属监控页操作（轨道训练与谱面主训练共用数据目录，建议先跑完「训练模型」再训轨道）：
+        <div class="row" style="margin-top:8px">
+          <button id="openShapeMonitor" class="ghost">打开轨道训练监控页（启动/停止/进度）</button>
+          <span id="shapeStatus"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>轨道模型（ShapeModel）训练状态 <span id="shapeBadge" class="badge idle">空闲</span></div>
+        <button id="shapeClear" class="ghost" style="padding:6px 12px">清空日志</button>
+      </div>
+      <div id="shapeLog" class="trainlog"></div>
     </div>
   </section>
 
@@ -167,6 +230,9 @@
           <input id="ddpm_epochs" type="number" min="1" max="1000" step="1" value="120">
         </div>
       </div>
+      <div class="row" style="margin-top:12px">
+        <label class="stem-label"><input id="finetune_on" type="checkbox"> 微调模式（从已有 onset_net.pt 继续训，保留其他歌能力；输出 onset_net_finetune.pt，不覆盖原权重）</label>
+      </div>
       <div class="row" style="margin-top:14px">
         <button id="trainAll" class="primary">一键全训（推荐）</button>
         <button id="trainOnset" class="ghost">只训踩点模型</button>
@@ -184,9 +250,62 @@
       <div id="trainLog" class="trainlog"></div>
     </div>
   </section>
+
+  <!-- ============ 训练视觉特效 VFXNet ============ -->
+  <section id="vfxView" hidden>
+    <div class="card">
+      <div class="note">
+        <b>VFXNet</b>：在「已成谱面」上学习添加纯视觉特效（镜头 MoveCamera / 轨道 MoveTrack / 滤镜 SetFilter /
+        闪光 Flash / 泛光 Bloom / 变色 RecolorTrack 等）。<b>不碰踩点、Twirl、SetSpeed</b>，失败了也不影响出谱。
+        模型为帧级多任务（事件多标签 + 关键参数 + 滤镜分类），生成端使用默认中等强度（约 50%）。
+      </div>
+      <div class="ctrl">
+        <label>视觉训练数据目录</label>
+        <input id="vfx_data_dir" type="text" value="D:/ADOFAI_AI_Mug/vision/best"
+               style="width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:9px 10px;font:inherit">
+        <div class="hint">双击修改。每个子文件夹一首歌（含 .adofai 与音频配对）。默认已指向你整理的精选视觉语料 <code>vision/best</code>。</div>
+      </div>
+      <div class="grid" style="margin-top:12px">
+        <div class="ctrl">
+          <label>训练轮数 (epochs)</label>
+          <input id="vfx_epochs" type="number" min="1" max="500" step="1" value="60">
+          <div class="hint">轮数越多越像你的风格，但越慢。默认 60。</div>
+        </div>
+        <div class="ctrl">
+          <label>重建数据缓存</label>
+          <div class="row" style="margin-top:6px">
+            <label class="stem-label"><input id="vfx_rebuild" type="checkbox"> 强制重新提取（改了目录或谱面后勾选）</label>
+          </div>
+          <div class="hint">默认不勾：直接复用已有 <code>data/vfx_cache</code>；改了数据目录或更换谱面后请勾上重提。</div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button id="vfxTrainBtn" class="primary">开始训练 VFXNet</button>
+        <button id="vfxStopBtn" class="warn">停止</button>
+        <span id="vfxStatus"></span>
+      </div>
+      <div class="note" style="margin-top:12px">
+        ⚠️ 两步流程：① 先提取视觉事件目标缓存（较慢，97 首约几分钟）→ ② 训练多任务模型（GPU 上很快）。
+        训练产出权重 <code>data/checkpoints/vfx_net.pt</code>（约 2–4 MB）。
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div>VFXNet 训练日志 <span id="vfxBadge" class="badge idle">空闲</span></div>
+        <button id="vfxClear" class="ghost" style="padding:6px 12px">清空日志</button>
+      </div>
+      <div class="progress-wrap" id="vfxProgressWrap" hidden>
+        <div class="progress-bar"><div class="progress-fill" id="vfxProgressFill"></div></div>
+        <div class="progress-txt" id="vfxProgressTxt">—</div>
+      </div>
+      <div id="vfxLog" class="trainlog"></div>
+    </div>
+  </section>
 </main>
 
-<footer>ADOFAI Maker · 128 全链路 · 本地运行，不上传任何数据</footer>
+
+<footer>ADOFAI Diffusion · Made By <b>iDQhonefully</b> / <b>DriveQualityHigh</b> · 本地运行，不上传任何数据</footer>
 
 <script>
   const $ = id => document.getElementById(id);
@@ -194,12 +313,59 @@
   let logTimer = null;
   let originalURL = null;
 
+  /* ---------- 真实模型状态探测（替换写死的「没有模型」提示） ---------- */
+  async function refreshModelStatus(){
+    try{
+      const r = await fetch('/api/model_status');
+      const d = await r.json();
+      const ms = $('modelStatus');
+      if(ms){
+        ms.innerHTML = '';
+        (d.models || []).forEach(m=>{
+          const chip = document.createElement('div');
+          chip.className = 'chip ' + (m.present ? 'ok' : 'miss');
+          chip.innerHTML =
+            `<span class="nm">${m.label}</span>` +
+            `<span class="st">${m.present ? '✅ 已就绪' : '⚠️ 缺失'}</span>` +
+            `<span class="sz">${m.present ? m.size_mb + ' MB' : m.file}</span>`;
+          ms.appendChild(chip);
+        });
+      }
+      const sum = $('modelSummary');
+      if(sum){
+        sum.style.borderLeftColor = d.all_ready ? 'var(--ok)' : 'var(--warn)';
+        sum.innerHTML = d.all_ready
+          ? '✅ 全部模型权重已就绪，可直接生成谱面（含视觉特效）。'
+          : '⚠️ 部分模型权重缺失，生成可能失败。请到「训练模型」/「训练视觉特效」页补齐权重后刷新本页。';
+      }
+      // VFX 提示动态化
+      const vfx = (d.models || []).find(m => m.file === 'vfx_net.pt');
+      const vp = $('vfxPending');
+      if(vp && vfx){
+        if(vfx.present){
+          vp.style.borderLeftColor = 'var(--ok)';
+          vp.innerHTML = '✅ VFX 权重已就绪（vfx_net.pt）。勾选「生成时加入视觉特效」即可在生成谱面时自动注入与音乐呼应的视觉特效。';
+        } else {
+          vp.style.borderLeftColor = 'var(--warn)';
+          vp.innerHTML = '⚠️ VFX 权重（vfx_net.pt）缺失。想加视觉特效请先到「训练视觉特效」页训练后再试。';
+        }
+      }
+    }catch(e){ /* 接口不可用时静默，保持页面其余功能可用 */ }
+  }
+
   function switchTab(t){
     $('genView').hidden = (t!=='gen');
+    $('shapeView').hidden = (t!=='shape');
     $('trainView').hidden = (t!=='train');
+    $('vfxView').hidden = (t!=='vfx');
     $('tabGen').classList.toggle('active', t==='gen');
+    $('tabShape').classList.toggle('active', t==='shape');
     $('tabTrain').classList.toggle('active', t==='train');
+    $('tabVfx').classList.toggle('active', t==='vfx');
     if(t==='train') startLogPolling(); else stopLogPolling();
+    if(t==='shape') startShapeLogPolling(); else stopShapeLogPolling();
+    if(t==='vfx') startVfxLogPolling(); else stopVfxLogPolling();
+    refreshModelStatus();
   }
 
   /* ---------- 生成（三步） ---------- */
@@ -210,7 +376,7 @@
     originalURL = URL.createObjectURL(f);
     $('fname').textContent = f.name + '  (' + (f.size/1048576).toFixed(2) + ' MB)';
     $('sepBtn').disabled = false;
-    $('stemList').innerHTML = '';
+    renderOriginalOnly();   // 选中即显示「原音频」可选项，免得为原音频白等分解
     $('gen').disabled = true;
     $('err').textContent = '';
     $('results').hidden = true;
@@ -240,6 +406,24 @@
       $('sepStatus').textContent = '分解完成，勾选要用的音轨（见下方）';
     }catch(err){ $('sepStatus').textContent='请求失败：'+err; $('sepBtn').disabled=false; }
   });
+
+  // 优化：选中音频后无需先分解即可勾选「原音频」直接生成（后端 selected='all' 走全混音，不依赖分离）
+  function renderOriginalOnly(){
+    const box = $('stemList');
+    box.innerHTML = '';
+    const orig = document.createElement('div');
+    orig.className = 'stem-row';
+    orig.innerHTML = '<label class="stem-label"><input type="checkbox" id="origChk"> 原音频（不分解，直接处理）</label>' +
+      '<audio controls src="'+originalURL+'" style="width:100%"></audio>';
+    box.appendChild(orig);
+    const sep = document.createElement('div');
+    sep.className = 'hint';
+    sep.style.margin = '12px 0 4px';
+    sep.textContent = '直接勾选上方「原音频」即可生成（无需分解）。或点「分解音频」选分离音轨：';
+    box.appendChild(sep);
+    $('origChk').addEventListener('change', updateMutex);
+    updateMutex();
+  }
 
   function renderStems(stems){
     const box = $('stemList');
@@ -293,7 +477,8 @@
       const bpmRaw = $('bpm').value.trim();
       const params = { difficulty: +$('difficulty').value,
         bpm: (bpmRaw==='' ? '' : (+bpmRaw)),
-        selected: selected };
+        selected: selected,
+        vfx: $('vfx_on').checked };
       const buf = await selectedFile.arrayBuffer();
       const resp = await fetch('/api/generate?name='+encodeURIComponent(selectedFile.name), {
         method:'POST', headers:{'X-Settings':JSON.stringify(params)}, body:buf });
@@ -310,8 +495,9 @@
     const maxErr = (d.max_error_ms==null)?'—（模型路线不校验）':(d.max_error_ms+' ms');
     const meanErr = (d.mean_error_ms==null)?'—':(d.mean_error_ms+' ms');
     $('stats').innerHTML =
-      '生成方式：<b>128 全链路（OnsetNet + VAE/扩散）</b><br>'+
-      '音符数：<b>'+d.note_count+'</b> &nbsp;·&nbsp; Twirl 翻身：<b>'+d.twirl_count+'</b> &nbsp;·&nbsp; 使用 BPM：<b>'+d.bpm_used+'</b><br>'+
+      '生成方式：<b>ADOFAI Diffusion（OnsetNet + VAE/扩散）</b><br>'+
+      '音符数：<b>'+d.note_count+'</b> &nbsp;·&nbsp; Twirl 翻身：<b>'+d.twirl_count+'</b> &nbsp;·&nbsp; 使用 BPM：<b>'+d.bpm_used+'</b>'+
+      (d.vfx_count?('&nbsp;·&nbsp; 视觉特效：<b>'+d.vfx_count+'</b>'):'')+'<br>'+
       '最大时间误差：<b>'+maxErr+'</b> &nbsp;·&nbsp; 平均误差：<b>'+meanErr+'</b> &nbsp;·&nbsp; 时长：<b>'+d.duration_s+' s</b>';
     const aAdo=$('dlAdo'); aAdo.href=URL.createObjectURL(new Blob([d.adofai],{type:'application/json'}));
     aAdo.download=(d.song||'chart')+'.adofai';
@@ -344,7 +530,8 @@
     const payload = { kind, data_dir,
       onset_epochs: +$('onset_epochs').value,
       vae_epochs: +$('vae_epochs').value,
-      ddpm_epochs: +$('ddpm_epochs').value };
+      ddpm_epochs: +$('ddpm_epochs').value,
+      finetune_on: $('finetune_on').checked };
     $('trainStatus').textContent='请求中…';
     try{
       const r = await fetch('/api/train_start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -363,10 +550,86 @@
   });
   $('trainClear').addEventListener('click', ()=>{ $('trainLog').textContent=''; });
 
+  /* ---------- 训练轨道模型 ShapeModel（只读展示：复用 /api/shape_train_log） ---------- */
+  let shapeLogTimer = null;
+  function startShapeLogPolling(){
+    if(shapeLogTimer) return;
+    shapeLogTimer = setInterval(pollShapeLog, 1500);
+    pollShapeLog();
+  }
+  function stopShapeLogPolling(){ if(shapeLogTimer){clearInterval(shapeLogTimer); shapeLogTimer=null;} }
+  async function pollShapeLog(){
+    try{
+      const r = await fetch('/api/shape_train_log', {headers:{'X-Lines':'400'}});
+      const d = await r.json();
+      $('shapeLog').textContent = d.log;
+      $('shapeLog').scrollTop = $('shapeLog').scrollHeight;
+      const b = $('shapeBadge');
+      b.className = 'badge ' + (d.status==='running'?'run':(d.status==='error'?'err':(d.status==='done'?'done':'idle')));
+      b.textContent = d.status==='running' ? ('训练中：'+d.phase) : (d.status==='done'?'已完成 ✓':(d.status==='error'?'失败':'空闲'));
+      if(d.status!=='running'){ $('shapeStatus').textContent = d.status==='done'?'轨道模型训练完成，权重已保存 shape_model.pt':'训练结束（见日志）'; }
+    }catch(e){}
+  }
+  $('openShapeMonitor').addEventListener('click', ()=>{ window.open('/shape_monitor', '_blank'); });
+  $('shapeClear').addEventListener('click', ()=>{ $('shapeLog').textContent=''; });
+
+  /* ---------- 训练视觉特效 VFXNet ---------- */
+  let vfxLogTimer = null;
+  function startVfxLogPolling(){
+    if(vfxLogTimer) return;
+    vfxLogTimer = setInterval(pollVfxLog, 1500);
+    pollVfxLog();
+  }
+  function stopVfxLogPolling(){ if(vfxLogTimer){clearInterval(vfxLogTimer); vfxLogTimer=null;} }
+  async function pollVfxLog(){
+    try{
+      const r = await fetch('/api/vfx_train_log', {headers:{'X-Lines':'400'}});
+      const d = await r.json();
+      $('vfxLog').textContent = d.log;
+      $('vfxLog').scrollTop = $('vfxLog').scrollHeight;
+      const b = $('vfxBadge');
+      b.className = 'badge ' + (d.status==='running'?'run':(d.status==='error'?'err':(d.status==='done'?'done':'idle')));
+      b.textContent = d.status==='running' ? ('训练中：'+d.phase) : (d.status==='done'?'已完成 ✓':(d.status==='error'?'失败':'空闲'));
+      // 从日志文本解析最新 epoch 进度（前端解析，无需改动后端，避免重启打断训练）
+      const ms = d.log.match(/\[vfx\]\s*ep\s+\d+\/\d+.*?ev=[\d.]+.*?pa=[\d.]+.*?fl=[\d.]+/g);
+      const pw = $('vfxProgressWrap');
+      if(ms){
+        const last = ms[ms.length-1].match(/\[vfx\]\s*ep\s+(\d+)\/(\d+).*?ev=([\d.]+).*?pa=([\d.]+).*?fl=([\d.]+)/);
+        const cur=+last[1], tot=+last[2], pct=Math.round(cur/tot*100);
+        pw.hidden=false;
+        $('vfxProgressFill').style.width = pct+'%';
+        $('vfxProgressTxt').textContent = `进度 ${cur}/${tot}（${pct}%） · ev=${last[3]} pa=${last[4]} fl=${last[5]}`;
+      } else { pw.hidden=true; }
+      if(d.status!=='running'){ $('vfxStatus').textContent = d.status==='done'?'VFXNet 训练完成，权重已保存 vfx_net.pt':'训练结束（见日志）'; }
+    }catch(e){}
+  }
+  async function startVfxTrain(){
+    const data_dir = $('vfx_data_dir').value.trim();
+    const payload = { data_dir, epochs: +$('vfx_epochs').value, rebuild_cache: $('vfx_rebuild').checked };
+    $('vfxStatus').textContent='请求中…';
+    try{
+      const r = await fetch('/api/train_vfx_start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+      const d = await r.json();
+      if(!d.ok){ $('vfxStatus').textContent='启动失败：'+d.msg; return; }
+      $('vfxStatus').textContent='已启动：'+d.msg;
+      startVfxLogPolling();
+    }catch(e){ $('vfxStatus').textContent='请求失败：'+e; }
+  }
+  $('vfxTrainBtn').addEventListener('click', startVfxTrain);
+  $('vfxStopBtn').addEventListener('click', async ()=>{
+    try{ await fetch('/api/vfx_train_stop',{method:'POST'}); $('vfxStatus').textContent='已发送停止信号'; }catch(e){}
+  });
+  $('vfxClear').addEventListener('click', ()=>{ $('vfxLog').textContent=''; });
+
+  // VFX 强度滑块与说明弹窗已移除（生成端固定默认中等强度，约 50%）
+
   $('exit').addEventListener('click', async () => {
     try{ await fetch('/api/shutdown',{method:'POST'}); }catch(e){}
     $('status').textContent='正在退出…';
   });
+
+  // 页面加载即探测真实模型状态（替换写死的「没有模型」提示）
+  refreshModelStatus();
 </script>
 </body>
 </html>

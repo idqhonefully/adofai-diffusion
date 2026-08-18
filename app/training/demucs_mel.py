@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from chart_repr import SR, HOP  # 22050, 128(本路径全局, 踩点+扩散同网格)
+from device_util import get_safe_device
 
 N_MELS = 128
 N_FFT = 2048
@@ -46,7 +47,8 @@ HOP_MS_ONSET = 1000.0 * HOP_ONSET / SR          # ≈ 5.805 ms
 
 # 六通道组合（按乐器分离 + 混合/伴奏）
 STEMS = ["drums", "bass", "other", "vocals", "full", "accomp"]
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# 老显卡(如 GTX 10 系) torch.cuda.is_available() 会假阳性，必须用一次真实内核探测
+DEVICE = get_safe_device()
 CACHE_DIR = os.path.join(ROOT.parent, "data", "demucs_cache")
 
 _SEP = None  # (model, apply_model)
@@ -71,7 +73,7 @@ def release_sep():
     """
     global _SEP
     _SEP = None
-    if torch.cuda.is_available():
+    if get_safe_device() == "cuda":
         torch.cuda.empty_cache()
 
 

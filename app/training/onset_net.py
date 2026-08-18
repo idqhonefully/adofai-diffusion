@@ -51,7 +51,8 @@ def normalize_mel(mel: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def predict_onset_frames(model, mel_np, thr: float = 0.4, min_dist: int = 2,
+def predict_onset_frames(model, mel_np, thr: float = 0.3, min_dist: int = 2,
+                         thr_local: float = 0.3, local_win: int = 64,
                          device: str = "cpu"):
     """用训练好的 OnsetNet 从多通道 log-mel 预测 onset 帧下标列表。
 
@@ -72,16 +73,24 @@ def predict_onset_frames(model, mel_np, thr: float = 0.4, min_dist: int = 2,
     logits = model(x)[0]                     # (T,)
     prob = torch.sigmoid(logits).cpu().numpy().astype("float32")
     T = prob.shape[0]
-    # 自适应阈值 + 局部最大 + 最小间距（与 detect_onset_frames 同思路，但作用在模型概率上）
+    # 峰值提取：全局相对阈值保最强段，额外叠加【滑动窗口局部相对阈值】，
+    # 避免中段弱奏被全局最强段(peak)压制成 0.3×peak 而整段被吞（"中段跳踩好多"的根因）。
     peak = float(prob.max())
     if peak < 1e-6:
         return [], prob
-    th = max(thr * peak, 0.04)
+    th_global = max(thr * peak, 0.04)
+    win = max(8, int(local_win))
     frames, last = [], -10 ** 9
     for f in range(1, T - 1):
-        if prob[f] >= prob[f - 1] and prob[f] > prob[f + 1] and prob[f] > th:
-            if f - last < min_dist:
-                continue
-            frames.append(int(f))
-            last = f
+        if prob[f] >= prob[f - 1] and prob[f] > prob[f + 1]:
+            # 局部窗口峰值 -> 局部自适应阈值（静音段仍被 0.04 下限拦住）
+            lo, hi = max(0, f - win), min(T, f + win + 1)
+            win_peak = float(prob[lo:hi].max())
+            th_local = max(thr_local * win_peak, 0.04)
+            # 取全局/局部较松者：全局峰值全保留 + 局部显著峰补回中段漏检
+            if prob[f] > th_global or prob[f] > th_local:
+                if f - last < min_dist:
+                    continue
+                frames.append(int(f))
+                last = f
     return frames, prob

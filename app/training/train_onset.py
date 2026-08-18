@@ -32,9 +32,12 @@ from adofai_parse import load_adofai
 from chart_repr import adofai_to_dense, SR, HOP
 from onset_net import OnsetNet, normalize_mel
 from demucs_mel import demucs_mel, HOP_MS_ONSET, HOP_ONSET, STEMS, release_sep, _cache_path
+from beat_this_align import estimate_beats, build_beat_phase, BEAT_COND_CH
+from device_util import get_safe_device
 
 N_MELS = 128
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# 老显卡(如 GTX 10 系) torch.cuda.is_available() 会假阳性，必须用一次真实内核探测
+DEVICE = get_safe_device()
 
 
 def _mel(y):
@@ -53,8 +56,12 @@ def _pairs(train_dir):
     return pairs
 
 
-def build_samples(train_dir, chunk=512, stride=256):
-    """返回 (mels:list[(128,chunk)], targets:list[(1,chunk)], pos_weight)。"""
+def build_samples(train_dir, chunk=512, stride=256, beat_grid=False):
+    """返回 (mels, targets, pos_weight)。
+
+    beat_grid=True 时，每个样本 mel 为 9 通道 = 6 Demucs + 3 节拍相位条件
+    (sin2πφ, cos2πφ, downbeat_gate)，与 onset 真值同 hop128 网格逐帧对齐。
+    """
     mels, targets = [], []
     np_sum = 0.0
     np_count = 0
@@ -79,9 +86,22 @@ def build_samples(train_dir, chunk=512, stride=256):
             if dense.sum() == 0:
                 continue
             onset = dense[0:1]                 # (1, T) 真值热图
+            # —— Phase B：Beat This! 节拍相位条件（3 通道）与 mel 同网格，逐块拼接 ——
+            bg = None
+            if beat_grid:
+                try:
+                    _b, _db = estimate_beats(ogg, device="cpu")
+                    bg = build_beat_phase(_b, _db, T)   # (3,128,T) @ hop128
+                except Exception as e:
+                    print(f"[beat_this] 条件构建失败({e})，该曲退化纯 mel")
+                    bg = None
             for s in range(0, max(1, T - chunk) + 1, stride):
                 if s + chunk <= T:
-                    mels.append(mel[:, :, s:s + chunk])   # (6,128,chunk) 时间轴在最后一维
+                    if bg is not None:
+                        mels.append(np.concatenate(
+                            [mel[:, :, s:s + chunk], bg[:, :, s:s + chunk]], axis=0))  # (9,128,chunk)
+                    else:
+                        mels.append(mel[:, :, s:s + chunk])   # (6,128,chunk) 时间轴在最后一维
                     targets.append(onset[:, s:s + chunk])  # (1,chunk) 时间轴在最后一维
                     np_sum += float(onset[:, s:s + chunk].sum())
                     np_count += chunk
@@ -123,10 +143,20 @@ def main():
     ap.add_argument("--chunk", type=int, default=1024)
     ap.add_argument("--stride", type=int, default=512)
     ap.add_argument("--out", default=str(ROOT / "data" / "checkpoints" / "onset_net.pt"))
+    ap.add_argument("--beat_grid", action="store_true",
+                    help="把 Beat This! 节拍相位条件(3通道)拼入 OnsetNet，in_channels=9（需重训）")
+    ap.add_argument("--resume", default=None,
+                    help="微调: 从已有 onset_net.pt 加载权重继续训练(保留其他歌能力); "
+                         "不指定则从头训(会覆盖其他歌知识, 慎用)")
     a = ap.parse_args()
 
-    print(f"[cfg] device={DEVICE}  train_dir={a.train_dir}")
-    mels, targets, pos_weight = build_samples(a.train_dir, a.chunk, a.stride)
+    in_ch = len(STEMS) + (BEAT_COND_CH if a.beat_grid else 0)
+    out = a.out
+    if a.beat_grid:
+        out = str(ROOT / "data" / "checkpoints" / "onset_net_beatgrid.pt")
+
+    print(f"[cfg] device={DEVICE}  train_dir={a.train_dir}  beat_grid={a.beat_grid}")
+    mels, targets, pos_weight = build_samples(a.train_dir, a.chunk, a.stride, beat_grid=a.beat_grid)
     if not mels:
         print("[err] 没有可用训练样本"); return
     if torch.cuda.is_available():
@@ -134,9 +164,18 @@ def main():
     ds = OnsetDataset(mels, targets)
     dl = td.DataLoader(ds, batch_size=a.batch, shuffle=True, num_workers=0, drop_last=False)
 
-    model = OnsetNet(n_mels=N_MELS, in_channels=len(STEMS)).to(DEVICE)
+    model = OnsetNet(n_mels=N_MELS, in_channels=in_ch).to(DEVICE)
+    if a.resume and os.path.exists(a.resume):
+        try:
+            model.load_state_dict(torch.load(a.resume, map_location=DEVICE))
+            print(f"[resume] 已从 {a.resume} 加载权重, 继续微调(保留其他歌能力)")
+        except Exception as e:
+            print(f"[warn] --resume 加载失败({e}), 改为从头训")
+    elif a.resume:
+        print(f"[warn] --resume 指定但文件不存在: {a.resume}, 将从头训")
     n_params = sum(p.numel() for p in model.parameters())
-    print(f"[model] OnsetNet 参数={n_params:,}  in_channels={len(STEMS)} (Demucs 多通道)")
+    print(f"[model] OnsetNet 参数={n_params:,}  in_channels={in_ch} "
+          f"({('含节拍网格 beatgrid' if a.beat_grid else 'Demucs 6通道')})")
     criterion = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_weight], device=DEVICE))
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
 

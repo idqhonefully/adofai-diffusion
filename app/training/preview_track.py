@@ -19,6 +19,7 @@ for p in (APP, ROOT):
 
 import torch
 import librosa
+from device_util import get_safe_device
 
 SR = 22050
 VALID = ("all", "drums", "bass", "other", "vocals", "accomp")
@@ -26,7 +27,7 @@ VALID = ("all", "drums", "bass", "other", "vocals", "accomp")
 
 def _separate_stem(audio_path, track):
     """返回 (stem_22050_mono float32, sr)。逻辑与 demucs_mel.demucs_mel 一致。"""
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = get_safe_device()   # 老显卡 CUDA 假阳性，先探测再决定
     from demucs_mel import _get_sep
 
     if track == "all" or track not in VALID:

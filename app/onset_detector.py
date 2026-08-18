@@ -25,6 +25,7 @@ onset_detector.py — 音频 -> 节拍时间戳（采音）
 （备用）estimate_bpm：自相关在 onset 间隔上找主周期，供以后"网格吸附/节拍对齐"用。
 """
 import os
+import sys
 import wave
 import subprocess
 import numpy as np
@@ -43,8 +44,21 @@ _MEL_FILTERBANK = None
 # 音频读取 / 解码
 # ---------------------------------------------------------------------------
 def _ffmpeg_exe():
-    """优先用 imageio-ffmpeg 自带的静态二进制（随包分发，免系统安装），
-    回退到系统 PATH 里的 ffmpeg。"""
+    """定位 ffmpeg 可执行文件，按优先级：
+    1) portable 根目录自带的 ffmpeg.exe（彻底离线、免系统安装，最优先）
+    2) 与当前 python.exe 同目录
+    3) imageio-ffmpeg 自带的静态二进制（pip 安装时联网下载，可能缺失）
+    4) 系统 PATH 里的 ffmpeg
+    这样即便离线 / venv 不完整，也能用内置 ffmpeg 工作。"""
+    # portable 根目录（本文件在 app/ 下，回退两级到 portable 根）
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates = [
+        os.path.join(_root, "ffmpeg.exe"),
+        os.path.join(os.path.dirname(sys.executable), "ffmpeg.exe"),
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
     try:
         import imageio_ffmpeg
         exe = imageio_ffmpeg.get_ffmpeg_exe()

@@ -38,7 +38,7 @@ N_CH = 3
 DIR_LEFT = 0
 DIR_RIGHT = 1
 SR = 22050
-# ── 128 全链路版本 ──────────────────────────────────────────────
+# ── ADOFAI Diffusion（hop=128 高分辨率网格）─────────────────────
 # hop_length=128 ≈ 5.805 ms/帧（原 512 的 1/4 时间分辨率），踩点/事件网格都跑 128，
 # 整条链路（OnsetNet 踩点 + VAE/扩散加事件）同一网格，落谱无需换算。
 HOP = 128
@@ -138,7 +138,7 @@ def _shortest(a):
     return a - 360.0 if a > 180.0 else a
 
 
-def plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=None, step=1.0):
+def plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=None, turn_sign=None, step=1.0):
     """计时反推式路径规划(含可选 Twirl)——这是大佬"第二个模型加事件"的可微替代。
 
     核心: ADOFAI 计时引擎里 Twirl 会翻转 direction, 而引擎按 p_angle=(dest_{i-1}-180-dest_i)*dir
@@ -164,13 +164,69 @@ def plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=None, step=1.0):
     angleData = []
     twirls = []
     last_tw = -10
-    R_TARGET = 25.0
+    last_turn_dir = 0.0   # 上一次实际视觉拐向(+1=左/-1=右), 0=无(直行或未开始)
+    # R_TARGET：出屏惩罚阈值(球到原点距离超过则扣分)。原 25 把球死锁在中心小圈(实测
+    # 生成 RMS≈14, 而真实谱面 RMS 中位数≈57) -> 用户反馈"全聚到正中间"。放大到 90
+    # 让球能大幅铺开(匹配真实谱面尺度, 但仍锚定中心不会飞太远)。
+    R_TARGET = 90.0
+    # —— 模型接管模式：放开几何约束，让 ShapeModel 主导走向（用户要求"敞开了走"） ——
+    # 无模型(几何贪心)时维持原硬约束(自交否决/出屏惩罚/Twirl 间隔)，行为不变；
+    # 有模型时：自交降级为弱惩罚(不否决)、出屏完全放开、Twirl 间隔放开、模型方向强主导。
+    shape_mode = turn_sign is not None
+    if shape_mode:
+        # 修正(2026-08-15): 之前 SHAPE_W=100 + 零惩罚 -> 每格都按模型左右翻向,
+        # Twirl 飙到 ~47 次/120格, 球不断掉头折返 => 糊成一团。现在改为:
+        # 几何主导(不自交/不出屏), 模型只在「该拐」时温和偏置左右, 并强制 Twirl 间隔,
+        # 让球平时直行、到转角才拐 -> 真实 ADOFAI 那种"一朝着一个方向延伸"的走法。
+        INTER_PENALTY = 0.0    # 允许自交(真实谱面本就交叉; 不否决则球不必绕中心折返)
+        OVER_W = 0.0           # 出屏惩罚已按用户要求移除(球可敞开铺满屏幕, 不被 R_TARGET 锁中心)
+        SHAPE_W = 4.0          # 模型方向温和偏置(不再每格强翻)
+        ALTERNATE_BONUS = 6.0   # (2026-08-17) 轻度调疏: 从10降到6, 削弱「每格强制左右交替」
+        SAME_PENALTY = 6.0      # 同向惩罚同步降低 -> 允许偶尔同向续拐/直行(同向不翻奇偶=不twirl),
+                                 # twirl 少约三成, zigzag 招牌仍在(不再每格都翻身)
+        TW_GAP_PENALTY = 0.0    # zigzag 本就相邻翻转 -> 关掉间隔惩罚(否则抵消交替奖励)
+        # 直线格 twirl 抑制(与贪心同逻辑): mag≈180 的直线格翻转奇偶视觉仍走直线, 无意义 -> 抑制。
+        # 仅抑制直线格, 转向格的 zigzag 不受影响(招牌风格保留)。
+        STRAIGHT_TW_PENALTY = 8.0
+        STRAIGHT_THR = 30.0
+        # 持续向前延伸/防自旋 = 奖励「异方向」(连续反向拐弯), 即下方 ALTERNATE_BONUS 的语义。
+        # 注: 当前候选循环里 vt 只取决于入向 parity(两候选相同), 故 ALTERNATE_BONUS 与旧的
+        # FWD_W 都形同虚设 -> 实际走线由 ShapeModel(desired, SHAPE_W)主导。要让「异方向」真正
+        # 生效, 必须改用出向 parity d2(两候选不同)做奖励, 见下方循环内的 ALT_W。
+        ALT_W = 4.0            # 「异方向」真实奖励(>0 开启): 与 SHAPE_W 同量级 -> 温和抬升 zigzag 密度, 不抢模型主导
+        step = 2.6             # 铺开尺度放大
+    else:
+        INTER_PENALTY = 1e9    # 几何贪心: 自交一票否决
+        OVER_W = 1.0           # 几何贪心: 出屏惩罚
+        SHAPE_W = 0.0
+        TW_GAP_PENALTY = 50.0
+        # 直线格 twirl 抑制: 该 tile 几乎不转向(|vt|<阈值)时, twirl 只是翻转奇偶,
+        # 视觉上仍走直线(毫无意义)却把后续转向方向弄反 -> 纯添乱。仅几何贪心模式启用
+        # (形状模式靠真实拐弯产生 zigzag, 不受影响, 故放在 else 分支)。
+        STRAIGHT_TW_PENALTY = 8.0
+        STRAIGHT_THR = 30.0
     for i, mag in enumerate(magnitudes):
         mag = float(mag)
+        # 摆形状模型: turn_sign[i]<0 -> 期望往右(d2=-1); >=0 -> 往左(d2=+1)。
+        # 为 None 时退化为纯几何贪心(当前回滚版行为, 不影响已认可的 Twirl)。
+        desired = None
+        if turn_sign is not None and i < len(turn_sign):
+            desired = -1.0 if float(turn_sign[i]) < 0 else 1.0
         best = None
-        for tw in (False, True):
-            d2 = d if not tw else -d
-            dest_i = _fmod(dest_prev - 180.0 - mag * d2, 360.0)
+        # tile 0(出生格) 旋转方向固定为初始方向(+1)：ADOFAI 里 tile0 是起点，
+        # 没有"到达之前可翻转"的 Twirl，其 direction 恒为初始 +1。强制 d2=+1
+        # 既符合物理(出生格不能 Twirl，也满足用户规则"floor0 禁止 Twirl")，
+        # 又避免「tile0 本想翻转却无法表达 -> 整条方向链从起点就差一符号 -> 全反」。
+        if i == 0:
+            d2_candidates = (1.0,)
+        else:
+            d2_candidates = (1.0, -1.0)   # 其余格子两种绝对方向都允许
+        for d2 in d2_candidates:                  # 两种绝对方向(模型接管形状, 不再锁死同向)
+            tw = (d2 != d)                        # 该方向与当前 parity 相反 -> 记一次 Twirl(视觉镜像翻转)
+            # 关键修正(2026-08-16)：当前格的到达角度用「到达方向 d」(Twirl 只镜像「离开」那段,
+            # 到达位置不变), 翻转推迟到下一格(dest_{i+1} 才用 d2)。否则 dest_i 用翻转后的 d2
+            # 会与真实 ADOFAI(用到达方向算当前格)差半格 -> Twirl 整条方向链错位。
+            dest_i = _fmod(dest_prev - 180.0 - mag * d, 360.0)
             vt = _shortest(dest_i - dest_prev)          # 视觉转向(用于几何)
             nh = heading + vt
             nx = pos[0] + step * math.cos(math.radians(nh))
@@ -183,24 +239,50 @@ def plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=None, step=1.0):
                     break
             dist = math.hypot(nx, ny)
             over = max(0.0, dist - R_TARGET)
-            # Twirl 偏好
+            # Twirl 偏好(音乐重音 + 模型 C2 弱偏置, 仅作点缀)
             td = 0.0
             if twirl_desire is not None and i < len(twirl_desire):
                 td = float(twirl_desire[i])
-            score = (1e9 if inter else 0.0) + over - td * 6.0
+            score = (INTER_PENALTY if inter else 0.0) + over * OVER_W - td * 6.0
+            # 持续向前延伸/防自旋(用户要「异方向」): 用出向 parity=d2(两候选不同)奖励「下一格转角
+            # 与上一实际转角异向」-> 真正能影响 Twirl 决策; ALT_W=0 时关闭(默认, 走线交给 ShapeModel)。
+            if shape_mode and ALT_W > 0.0 and last_turn_dir != 0.0:
+                next_sign = 1.0 if _shortest(-180.0 - mag * d2) >= 0.0 else -1.0
+                score += (-ALT_W if next_sign == -last_turn_dir else ALT_W)
             if tw:
-                score += 2.0                             # 基础成本: 无重音时不过度 Twirl
-                if (i - last_tw) < 4:                    # 与上个 Twirl 至少隔 4 格
-                    score += 50.0
+                score += (0.0 if shape_mode else 2.0)    # 模型接管时去掉基础 Twirl 成本, 翻身更自由
+                if (i - last_tw) < 4:                    # 模型接管时放开间隔
+                    score += TW_GAP_PENALTY
+            # 直线格抑制: 该 tile 几乎不转向(|vt|<STRAIGHT_THR)时, twirl 仅翻转奇偶,
+            # 视觉仍走直线(无意义)却弄反后续转向 -> 抑制。贪心与形状模式通用。
+            if tw and abs(vt) < STRAIGHT_THR:
+                score += STRAIGHT_TW_PENALTY
             if model_twirl is not None and i < len(model_twirl) and tw:
                 score -= float(model_twirl[i]) * 1.0     # 模型 C2 微弱偏置
+            # 学习形状偏置: 模型期望方向 -> 强主导(模型接管时几何约束已大幅放松)
+            if desired is not None and (d2 > 0) == (desired > 0):
+                score -= SHAPE_W
+            # 连续反向拐弯奖励(用户要求「左右左右左右」zigzag): 实际视觉拐向 vt_dir
+            # 与前一次拐向相反 -> 奖励; 同向(继续螺旋) -> 惩罚。权重(10)>SHAPE_W(4)
+            # 故稳定交替, 模型只在交替的二选一里做微弱左右偏好。
+            if shape_mode and vt != 0.0:
+                vt_dir = 1.0 if vt > 0.0 else -1.0
+                if last_turn_dir != 0.0:
+                    if vt_dir == -last_turn_dir:
+                        score -= ALTERNATE_BONUS
+                    else:
+                        score += SAME_PENALTY
             if best is None or score < best[0]:
                 best = (score, tw, d2, dest_i, vt, nh, (nx, ny), new_seg)
         _, tw, d2, dest_i, vt, nh, new_pos, new_seg = best
         angleData.append(int(round(_shortest(dest_i))))
+        # 更新连续反向拐弯状态(直行 vt=0 不打断「最近拐向」记忆)
+        if shape_mode and vt != 0.0:
+            last_turn_dir = 1.0 if vt > 0.0 else -1.0
         if tw:
-            # floor = 0-based tile index，与 compute_note_times(parsed[fl]) 一致
-            # （本项目引擎把 floor 当 parsed 下标，训练/解析均用 0-based，故保持一致）
+            # tile 0 不会进入这里：上面已强制 i==0 的 d2=+1，tw=(d2!=d)=False。
+            # （之前用"锁首格跳过 Twirl 事件"的 hack 反而让 tile0 想翻转却表达不出、
+            # 导致整条方向链从起点差一符号 —— 现改为"约束 tile0 方向=初始"从根上解决。）
             twirls.append(i)
             last_tw = i
         pos = new_pos
@@ -213,14 +295,145 @@ def plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=None, step=1.0):
     return angleData, twirls
 
 
+def plan_freeform_path(n, turn_sign, turn_base=12.0, target_times=None,
+                       global_bpm=120.0, hop_ms=HOP_MS, pitch=1.0,
+                       spiral_decay=0.0015):
+    """豪放自由走线（方案 B）—— 纯 angleData 大回环，不依赖 pathData。
+
+    为什么需要它：
+      原 plan_path_twirl 把每格转角锁死成 magnitude=beats*180（时间决定角度），
+      纯 angleData 下轨迹必为「90°/180° 折叠方波」。而新版本 ADOFAI 只用 angleData
+      算位置、pathData 无效，所以必须让 angleData 自身形成大回环。
+
+    做法：
+      1. 每格转 turn_base*sign 的【小角度】连续转弯 -> 轨迹是自由大回环/花瓣
+         （不再是急折返）；sign 由 ShapeModel 决定（左/右），模型真正主导走向。
+      2. 计时陷阱：timing_engine 的 p_angle=(cur_angle-dest)*dir 会把小角度差分
+         算成近整圈(338°)导致时间暴涨。解决：在【转向符号变化处】放 Twirl 翻转
+         dir，使 p_angle 恒=|turn|（小角度）。
+      3. 每格再用 SetSpeed(Multiplier) 把时间校准回 target_times（踩点） ->
+         形状与时间彻底解耦。
+
+    返回 (angleData, twirls, setspeeds)
+      angleData  : 连续绝对方向(0~360) list[float]，引擎会 mod360，无妨
+      twirls     : 计时用 Twirl 的 floor 列表（符号变化处）
+      setspeeds  : 每格 SetSpeed 事件列表（校准时间到 onset 间隔）
+    """
+    angleData = []
+    twirls = []
+    setspeeds = []
+    # 核心：ADOFAI 计时引擎每格 cur_angle 先减 180 度(出生偏移)，故【几何转向】与
+    # 【计时 p_angle】天然差 180 度。要让渲染是大回环，angleData 差分须为【小角度】
+    # (+-turn -> 连续转弯)；计时 p_angle 因此=180+-turn(半圈附近)。配合 dir=sign，
+    # 可令 p_angle 恒=180-|turn|，再用 SetSpeed 把时间校准到 target_times。
+    # cur_dir 从 0 度起步(而非 180 度)，使首格 p_angle 也=180-|turn| 对齐后续。
+    cur_dir = 0.0
+    eff_sign = 1.0   # 初始 dir=+1 => 期望 sign=+1（dir 必须=sign）
+    for i in range(n):
+        sign = 1.0
+        if turn_sign is not None and i < len(turn_sign):
+            sign = -1.0 if float(turn_sign[i]) < 0 else 1.0
+        decay = max(0.4, 1.0 - i * spiral_decay)   # 螺旋发散：曲率渐减 -> 圈逐渐变大铺开
+        turn = turn_base * sign * decay
+        cur_dir += turn          # 渲染：小角度连续转弯（螺旋发散）-> 大回环铺开
+        angleData.append(_fmod(cur_dir, 360.0))
+        # 计时 Twirl：本格 sign 与「当前有效 sign」不符时翻转 dir，使 dir=sign
+        # （p_angle 恒=180-|turn| 半圈附近，时间合理且可校准）。
+        # floor 0（第一格）ADOFAI 禁止放 Twirl：跳过首格
+        if i > 0 and sign != eff_sign:
+            twirls.append(i)
+            eff_sign = sign
+        # SetSpeed：把该格时间校准到 target_times[i]（踩点）。
+        # 必须用 speedType='Bpm'（绝对覆盖），不能用 'Multiplier'（跨格累积相乘爆炸）。
+        if target_times is not None and i < len(target_times):
+            Ti = max(1e-3, float(target_times[i]))
+            # p_angle 恒=180-|turn|：校准 bpm 使该格时间=Ti
+            p_angle = 180.0 - abs(turn)
+            bpm_eff = p_angle / 180.0 * 60000.0 / Ti
+            setspeeds.append({
+                "floor": int(i), "eventType": "SetSpeed",
+                "speedType": "Bpm", "beatsPerMinute": float(bpm_eff / pitch),
+            })
+    return angleData, twirls, setspeeds
+
+
 def plan_directions(magnitudes, model_dir=None, step=1.0):
     """向后兼容包装: 仅做无 Twirl 的计时反推规划(等价于 twirl_desire 全 0)。"""
     ang, _ = plan_path_twirl(magnitudes, twirl_desire=None, model_twirl=model_dir, step=step)
     return ang
 
 
+def _grid_snap_keep(kept, hop_ms, step_sec=None, max_fill_units=8):
+    """把检测到的音头帧吸附到规则节拍网格并补齐漏拍，根除时序漂移/跳踩。
+
+    网格步长优先用「音乐真实拍长」step_sec（由 BPM 给出，60/bpm）；未提供退化为中位数。
+    关键修复(2026-08-13 晚): 在 [首个音头, 末个音头] 跨度内生成【完整节拍网格】(每拍一点)，
+    凡是附近(≤0.5拍)没有 OnsetNet 音头的网格点一律补入 -> OnsetNet 漏检的拍 100% 被补上,
+    彻底消除"跳踩"。长空隙(>max_fill_units 拍, 视为静音)不补, 避免灌水。
+    保留每一个真实 onset(绝不删除), 仅去 <2 帧极近重复。
+    """
+    if len(kept) < 2:
+        return kept
+    kept = sorted(int(f) for f in kept)
+    if step_sec is None or step_sec <= 1e-4:
+        gaps = np.diff(kept).astype(np.float64) * (hop_ms / 1000.0)
+        step_sec = float(np.median(gaps)) if len(gaps) else float((kept[1] - kept[0]) * hop_ms / 1000.0)
+    if step_sec <= 1e-4:
+        return kept
+    hms = hop_ms / 1000.0
+    t0 = kept[0] * hms
+    t_end = kept[-1] * hms
+    step = step_sec
+    half = step * 0.5
+    max_dist = max_fill_units * step
+    # 完整节拍网格(覆盖整段已演奏区间)
+    grid = []
+    k = 0
+    while True:
+        t = t0 + k * step
+        if t > t_end + half:
+            break
+        grid.append(t)
+        k += 1
+    if not grid:
+        return kept
+    onset_t = [f * hms for f in kept]
+    out = []
+    gi = 0
+    n = len(grid)
+    for ot in onset_t:
+        # 插入本 onset 之前、且离任何 onset 都远(>half)的网格点 = 被漏检的拍。
+        # 关键修正(2026-08-16)：填满整段网格, 不再因空隙>max_fill_units 而跳过
+        # -> 根治「中间整段(如 2:00~2:10)被吞、后面直接拼接」的问题。真静音仍不灌水
+        # (网格只覆盖 [首个 onset, 末个 onset] 跨度, 之前/之后皆不补)。
+        while gi < n and grid[gi] < ot - half:
+            gp = grid[gi]
+            out.append(gp)
+            gi += 1
+        # 跳过与本 onset 重合(±half 内)的网格点, 避免重复
+        while gi < n and grid[gi] <= ot + half:
+            gi += 1
+        out.append(ot)
+    # 尾部网格点: 距最后一个 onset ≤max_dist 才补(避免尾奏静音灌水)
+    while gi < n:
+        gp = grid[gi]
+        if (gp - onset_t[-1]) <= max_dist:
+            out.append(gp)
+        gi += 1
+    out.sort()
+    res = []
+    for t in out:
+        f = int(round(t / hms))
+        if res and (f - res[-1]) < 2:
+            continue
+        res.append(f)
+    return res
+
+
 def dense_to_adofai(dense, global_bpm=120.0, hop_ms=HOP_MS, song="generated.mp3",
-                    onset_frames=None, twirl_desire=None):
+                    onset_frames=None, twirl_desire=None,
+                    turn_sign=None, shape_model=None, onset_prob=None,
+                    stem_energy=None, device=None):
     """(3, T) -> level dict（含 angleData/settings）。无法构成有效谱面返回 None。
 
     onset_frames: 可选。若提供（频谱 onset 检测器给出的帧下标），直接用作谱面格
@@ -257,6 +470,19 @@ def dense_to_adofai(dense, global_bpm=120.0, hop_ms=HOP_MS, song="generated.mp3"
         kept.append(f)
     if len(kept) < 2:
         return None
+    # 真实节拍步长（秒）：优先用 BPM 真拍(60/bpm)，彻底消除"帧取整把检测中位数偏置到
+    # 整数帧"导致的逐格累积漂移（例：200bpm 真拍=51.677帧，round 偏成 52 帧=301.9ms，
+    # 每拍 +1.9ms、整曲漂移 ~380ms）。用 BPM 真拍则每格恒=60/bpm，零漂移。
+    med_sec = 60.0 / float(global_bpm) if global_bpm and global_bpm > 0 else float(hop_ms / 1000.0)
+    if med_sec <= 1e-4:
+        med_sec = float(hop_ms / 1000.0)
+    # —— 节拍网格吸附 + 漏拍填充（修复"漏拍/跳拍/周期性错位"）——
+    # 检测到的音头含抖动/系统性延迟/中段偶发漏检：纯按音头间隔定角度会让微小偏差逐格
+    # 累积成相位漂移，漏检则整段错拍。改为吸附到 BPM 真拍网格并补齐空缺，使每格时长为
+    # 真拍整数倍 -> 完全锁定音乐节拍，不再漂移、不再漏拍。
+    kept = _grid_snap_keep(kept, hop_ms, step_sec=med_sec)
+    if len(kept) < 2:
+        return None
 
     # 方向(左/右)：左/右转音频完全相同，模型学不到，由几何路径规划指派。
     # Twirl：由「音乐重音 twirl_desire(onset 包络强度) + 模型 C2(弱偏置)」驱动，
@@ -276,7 +502,12 @@ def dense_to_adofai(dense, global_bpm=120.0, hop_ms=HOP_MS, song="generated.mp3"
                 [float(twirl_ch[f]) if 0 <= f < cl else 0.0 for f in kept],
                 dtype=np.float32)
 
-    # 先按【转换器】算每格转角幅度(确定性, 不塌缩/不错位)
+    # 先按【转换器】算每格转角幅度(确定性, 不塌缩/不错位)。
+    # 关键修复(2026-08-13): 之前为"消除漂移"把每格强行锁成 med_sec(=1拍) -> magnitude
+    # 恒=180° -> 路径全程直线(不拐弯)、aux[2] 恒定 -> VFXNet 输入无起伏 -> 特效塌到 6 个。
+    # 现恢复用【实际 onset 间隔 df】算转角幅度: 转角随音乐真实间隔变化 -> 路径自然蜿蜒;
+    # 且每格时长=AngleToTime(magnitude)=真实间隔(ms), 与音乐逐拍精确对齐, 不漂移——
+    # 漂移真凶是旧版 round 去重删拍(已 by v3 修复), 而非用实际间隔, 故恢复安全。
     magnitudes = []
     for k, f in enumerate(kept):
         if k < len(kept) - 1:
@@ -286,23 +517,46 @@ def dense_to_adofai(dense, global_bpm=120.0, hop_ms=HOP_MS, song="generated.mp3"
         seg_sec = max(0.0, df) * hop_ms / 1000.0
         beats = seg_sec * float(global_bpm) / 60.0
         magnitude = beats * 180.0
-        # 不再量化到 15° 倍数：直接取连续角度，最终 int(round) 取整度即可。
-        # ADOFAI angleData 本就是「整数度」，不必是 15° 倍数（15° 只是 path token 的
-        # 紧凑记号，游戏会转回度数）。保留 15° 量化是无谓的精度损失：每格时长误差从
-        # ~20ms/格(15°≈41.7ms)降到 ≤1.4ms/格(1°≈2.78ms@120bpm)，踩点显著更准。
-        if magnitude <= 0:
-            magnitude = 2.0
-        if magnitude >= 360:
-            magnitude = 358.0
         magnitudes.append(magnitude)
-    # 路径规划：方向 + 可选 Twirl（计时精确）
-    angleData, twirls = plan_path_twirl(
-        magnitudes,
-        twirl_desire=twirl_desire_per_tile,
-        model_twirl=model_twirl_per_tile,
-    )
-    # 把规划出的 Twirl 写成事件（0-based floor，与 compute_note_times 一致）
-    actions = [{"floor": int(f), "eventType": "Twirl"} for f in twirls]
+    # —— 摆形状模型：用模型决定每格左右(取代纯几何贪心) ——
+    # turn_sign 优先用外部传入；否则若给了模型+onset 概率，则在此推断。
+    turn_sign_arg = turn_sign
+    if turn_sign_arg is None and shape_model is not None and onset_prob is not None:
+        try:
+            from shape_model import extract_tile_features, predict_turn_sign
+            _se = stem_energy if stem_energy is not None else np.zeros((6, len(onset_prob)), np.float32)
+            _feats = extract_tile_features(kept, onset_prob, _se, float(global_bpm), hop_ms)
+            if _feats.shape[0] >= 2:
+                turn_sign_arg = predict_turn_sign(shape_model, _feats,
+                                                  device if device else "cpu")
+        except Exception as e:
+            print(f"[shape] 转向推断失败, 退回几何贪心: {e}")
+            turn_sign_arg = None
+
+    # —— 走线：模型接管 -> 豪放自由走线(B 方案); 否则几何贪心回退 ——
+    if turn_sign_arg is not None:
+        # 修正(2026-08-15): 之前走 plan_freeform_path 每格累 12°(螺旋)+每格 SetSpeed,
+        # 既糊成一团又塞满 SetSpeed(用户明确不要)。现改回计时闭式 plan_path_twirl:
+        # 角度按"间隔×180/拍长"锁死每格时长(踩点精确, 无需 SetSpeed), 模型只决定拐左/拐右,
+        # 几何约束(不自交/不出屏/Twirl间隔)保证球平时直行、到转角才拐 -> 真实 ADOFAI 走法。
+        angleData, shape_twirls = plan_path_twirl(
+            magnitudes,
+            twirl_desire=twirl_desire_per_tile,
+            model_twirl=model_twirl_per_tile,
+            turn_sign=turn_sign_arg,
+        )
+        actions = [{"floor": int(f) + 1, "eventType": "Twirl"} for f in shape_twirls]
+    else:
+        angleData, twirls = plan_path_twirl(
+            magnitudes,
+            twirl_desire=twirl_desire_per_tile,
+            model_twirl=model_twirl_per_tile,
+            turn_sign=None,
+        )
+        # 把规划出的 Twirl 写成事件（plan_path_twirl 返回 0-based tile 下标，
+        # ADOFAI floor 为 1-based，故 +1：tile 索引 0 对应第一格 floor 1）。
+        # plan_path_twirl 保证 tile 0 永不 Twirl，故 floor 1（首格）永不带 Twirl。
+        actions = [{"floor": int(f) + 1, "eventType": "Twirl"} for f in twirls]
 
     settings = {
         "bpm": float(global_bpm), "pitch": 100, "offset": 0, "song": song,

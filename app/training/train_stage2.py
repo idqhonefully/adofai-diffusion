@@ -21,6 +21,7 @@ os.environ.setdefault("KMP_AFFINITY", "disabled")
 from dataset import DenseChartDataset
 from vae import ChartVAE
 from diffusion import DDPM
+from device_util import get_safe_device
 
 TRAIN_DIR = os.environ.get("ADOFAI_TRAIN_DIR", "D:/Users/Windows/Desktop/train")
 OUT_DIR = os.environ.get("ADOFAI_DATA_DIR", str(ROOT / "data")) + "/checkpoints"
@@ -28,7 +29,8 @@ BATCH = 8
 VAE_EPOCHS = int(os.environ.get("VAE_EPOCHS", 60))
 DDPM_EPOCHS = int(os.environ.get("DDPM_EPOCHS", 120))
 LR = 1e-3
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# 老显卡(如 GTX 10 系) torch.cuda.is_available() 会假阳性，必须用一次真实内核探测
+DEVICE = get_safe_device()
 
 os.makedirs(OUT_DIR, exist_ok=True)
 print(f"[train] device={DEVICE}  out={OUT_DIR}")

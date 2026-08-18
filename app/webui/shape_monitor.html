@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ShapeModel 训练实时监控</title>
+<style>
+  *{box-sizing:border-box;}
+  body{background:#0e1116;color:#c9d1d9;font-family:Consolas,Menlo,monospace;margin:0;padding:16px;}
+  h1{font-size:18px;margin:0 0 12px;color:#58a6ff;}
+  .bar{display:flex;gap:12px;flex-wrap:wrap;align-items:stretch;margin-bottom:12px;}
+  .stat{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px 14px;min-width:120px;}
+  .stat .k{font-size:11px;color:#8b949e;}
+  .stat .v{font-size:20px;font-weight:bold;margin-top:2px;}
+  .v.ok{color:#3fb950;} .v.run{color:#58a6ff;} .v.warn{color:#d29922;} .v.err{color:#f85149;}
+  .featbox{flex:1;min-width:220px;}
+  .progress{height:10px;background:#21262d;border-radius:5px;overflow:hidden;margin-top:8px;}
+  .progress>div{height:100%;background:linear-gradient(90deg,#1f6feb,#58a6ff);width:0%;transition:width .3s;}
+  .controls{margin-bottom:10px;font-size:13px;color:#8b949e;}
+  .controls label{margin-right:14px;cursor:pointer;}
+  button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;border-radius:6px;padding:5px 12px;cursor:pointer;font-family:inherit;}
+  button:hover{border-color:#58a6ff;}
+  #log{background:#010409;border:1px solid #30363d;border-radius:8px;padding:12px;height:60vh;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:13px;line-height:1.5;}
+  .skip{color:#f85149;} .okl{color:#3fb950;}
+</style>
+</head>
+<body>
+<h1>🎯 ShapeModel 走线模型 · 训练实时监控</h1>
+<div class="bar">
+  <div class="stat"><div class="k">状态</div><div class="v" id="st">…</div></div>
+  <div class="stat"><div class="k">GPU 利用率</div><div class="v" id="gpu">…</div></div>
+  <div class="stat"><div class="k">已加载谱面</div><div class="v" id="ok">0</div></div>
+  <div class="stat"><div class="k">跳过(坏文件)</div><div class="v" id="skip">0</div></div>
+  <div class="stat featbox"><div class="k">预处理进度（特征缓存）</div>
+    <div class="v" id="feat">0 / 105</div>
+    <div class="progress"><div id="featbar"></div></div>
+  </div>
+</div>
+<div class="controls">
+  <label><input type="checkbox" id="autoscroll" checked> 自动滚动到底部</label>
+  <label><input type="checkbox" id="pause" onchange="togglePause()"> 暂停刷新</label>
+  <button onclick="document.getElementById('log').innerHTML=''">清屏</button>
+  <span id="ts"></span>
+</div>
+<div id="log"></div>
+<script>
+let timer=null, paused=false;
+function togglePause(){ paused=document.getElementById('pause').checked; }
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+async function poll(){
+  if(paused) return;
+  try{
+    const r=await fetch('/api/shape_train_log',{headers:{'X-Lines':'600'}});
+    const d=await r.json();
+    const st=document.getElementById('st');
+    st.textContent = d.done?'✅ 训练完成':(d.running?'🔄 训练中':'⏸ 未运行/已停');
+    st.className='v '+(d.done?'ok':(d.running?'run':'warn'));
+    const gpu=document.getElementById('gpu');
+    gpu.textContent = d.gpu_util==null?'N/A':d.gpu_util+'%';
+    gpu.className='v '+(d.gpu_util!=null&&d.gpu_util>50?'ok':'run');
+    document.getElementById('ok').textContent=d.ok;
+    document.getElementById('skip').textContent=d.skip;
+    const f=d.feat_done||0, tot=d.feat_total||105;
+    document.getElementById('feat').textContent=f+' / '+tot;
+    document.getElementById('featbar').style.width=Math.min(100,Math.round(f/tot*100))+'%';
+    const el=document.getElementById('log');
+    const atBottom = el.scrollTop+el.clientHeight >= el.scrollHeight-40;
+    el.innerHTML = esc(d.log).split('\n').map(l=>{
+      if(l.indexOf('[skip]')>=0) return '<span class="skip">'+l+'</span>';
+      if(l.trim().indexOf('+ ')===0) return '<span class="okl">'+l+'</span>';
+      return l;
+    }).join('\n');
+    if(document.getElementById('autoscroll').checked || atBottom) el.scrollTop=el.scrollHeight;
+    document.getElementById('ts').textContent='  更新于 '+new Date().toLocaleTimeString();
+    if(d.done && timer){ clearInterval(timer); }
+  }catch(e){
+    const st=document.getElementById('st');
+    st.textContent='⚠ 连接失败'; st.className='v err';
+  }
+}
+timer=setInterval(poll,2000);
+poll();
+</script>
+</body>
+</html>

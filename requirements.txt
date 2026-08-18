@@ -1,23 +1,12 @@
-# ADOFAI Maker 128 — 依赖清单
+# ADOFAI Diffusion —— 运行 / 训练依赖
 # 安装：pip install -r requirements.txt
-# 推荐环境：Windows + NVIDIA 显卡（CUDA）+ Python 3.12
-# 仅推理也能在纯 CPU 上跑，但很慢；训练必须用 GPU。
+# 推理与训练均需以下包；GPU 版 torch 请按你的 CUDA 版本从
+# https://pytorch.org 选取对应命令（本项目便携包使用 torch 2.11 + cu128）。
 
-# --- 深度学习框架 ---
-# 下面这行默认装 CPU 版 torch。若想用显卡加速（强烈推荐训练），请注释掉此行，
-# 改用与本机 CUDA 版本匹配的官方命令，例如 CUDA 12.1：
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 torch>=2.0
-
-# --- 音源分离（替代老式 HPSS，钢琴曲踩点更准）---
-demucs>=4.0
-
-# --- 音频 / 特征 ---
-librosa>=0.10
-numpy>=1.24
-
-# --- 绘图（生成梅尔频谱预览图）---
-matplotlib>=3.5
-
-# --- 音频解码（ffmpeg，随 imageio 自动带上，不用单独装 ffmpeg）---
-imageio-ffmpeg>=0.4
+numpy
+matplotlib
+librosa
+demucs
+soundfile
+scipy

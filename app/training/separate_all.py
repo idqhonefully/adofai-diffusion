@@ -54,7 +54,6 @@ def main():
         y_full, _ = librosa.load(a.audio, sr=SR, mono=True)
         L = len(y_full)
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
         from demucs_mel import _get_sep
         # Demucs 要求 44100 立体声输入
         y44, _ = librosa.load(a.audio, sr=44100, mono=False)
@@ -64,10 +63,25 @@ def main():
             y44 = np.repeat(y44, 2, axis=0)
         y44 = y44.astype(np.float32)
 
-        model, apply_model = _get_sep(device)
-        x = torch.from_numpy(y44).float().to(device)
-        with torch.no_grad():
-            sources = apply_model(model, x[None], device=device, progress=False)[0]  # (nsrc,2,N)
+        # 优先 GPU；若显卡架构不被打包的 PyTorch 支持
+        # （CUDA error: no kernel image is available for the device），自动退回 CPU。
+        # 退回后分离变慢但可用，避免老显卡用户直接报错。
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        try:
+            model, apply_model = _get_sep(device)
+            x = torch.from_numpy(y44).float().to(device)
+            with torch.no_grad():
+                sources = apply_model(model, x[None], device=device, progress=False)[0]  # (nsrc,2,N)
+        except Exception as e:
+            if device != "cuda":
+                raise
+            sys.stderr.write(f"[separate] GPU 分离失败({e})，退回 CPU\n")
+            sys.stderr.flush()
+            device = "cpu"
+            model, apply_model = _get_sep(device)
+            x = torch.from_numpy(y44).float().to(device)
+            with torch.no_grad():
+                sources = apply_model(model, x[None], device=device, progress=False)[0]
         names = list(model.sources)  # ['drums','bass','other','vocals']
 
         def get_stem(nm):

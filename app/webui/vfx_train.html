@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VFXNet 训练实时监控</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --border:#2a313c;
+    --txt:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --accent2:#3fb950;
+    --ev:#ff7b72; --pa:#d2a8ff; --gpu:#f0883e; --red:#f85149; --fl:#56d364; --ez:#58a6ff;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif;}
+  .wrap{max-width:1080px;margin:0 auto;padding:18px;}
+  header{display:flex;align-items:center;justify-content:space-between;
+    border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:18px;}
+  header h1{font-size:20px;margin:0;font-weight:600;}
+  .status{font-size:13px;padding:4px 12px;border-radius:20px;font-weight:600;}
+  .status.run{background:rgba(63,185,80,.15);color:var(--accent2);
+    border:1px solid rgba(63,185,80,.4);}
+  .status.idle{background:rgba(139,148,158,.15);color:var(--muted);
+    border:1px solid var(--border);}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .card .lbl{font-size:12px;color:var(--muted);margin-bottom:6px;}
+  .card .val{font-size:24px;font-weight:700;line-height:1;}
+  .card .sub{font-size:11px;color:var(--muted);margin-top:4px;}
+  .ev .val{color:var(--ev);} .pa .val{color:var(--pa);} .gpu .val{color:var(--gpu);}
+  .barwrap{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:14px;margin-bottom:14px;}
+  .barhead{display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px;}
+  .barhead b{color:var(--accent);}
+  .bar{height:14px;background:var(--panel2);border-radius:8px;overflow:hidden;
+    border:1px solid var(--border);}
+  .bar > i{display:block;height:100%;width:0;
+    background:linear-gradient(90deg,#1f6feb,#3fb950);transition:width .4s ease;}
+  .chartcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:14px;margin-bottom:14px;}
+  .chartcard h3{margin:0 0 10px;font-size:14px;font-weight:600;}
+  .legend{display:flex;gap:16px;font-size:12px;margin-bottom:8px;color:var(--muted);}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;}
+  canvas{width:100%;height:240px;display:block;}
+  .logcard{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    padding:14px;margin-bottom:14px;}
+  .logcard h3{margin:0 0 8px;font-size:14px;font-weight:600;display:flex;
+    justify-content:space-between;align-items:center;}
+  #log{font-family:"SFMono-Regular",Consolas,Menlo,monospace;font-size:12px;
+    line-height:1.5;color:#c9d1d9;background:#0b0f14;border:1px solid var(--border);
+    border-radius:8px;padding:10px;height:240px;overflow-y:auto;white-space:pre-wrap;
+    word-break:break-all;}
+  .btns{display:flex;gap:10px;}
+  button{background:var(--panel2);color:var(--txt);border:1px solid var(--border);
+    border-radius:8px;padding:9px 16px;font-size:13px;cursor:pointer;font-weight:600;}
+  button:hover{border-color:var(--accent);}
+  button.stop{color:var(--red);border-color:rgba(248,81,73,.4);}
+  button.stop:hover{background:rgba(248,81,73,.12);}
+  button:disabled{opacity:.5;cursor:not-allowed;}
+  .err{color:var(--red);font-size:12px;margin-top:8px;min-height:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🎯 VFXNet 训练实时监控</h1>
+    <span id="status" class="status idle">空闲</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="lbl">当前轮次 (Epoch)</div>
+      <div class="val" id="epoch">– / –</div>
+      <div class="sub" id="epsub">等待数据…</div>
+    </div>
+    <div class="card ev">
+      <div class="lbl">事件损失 ev</div>
+      <div class="val" id="ev">–</div>
+      <div class="sub">越低越好</div>
+    </div>
+    <div class="card pa">
+      <div class="lbl">参数损失 pa</div>
+      <div class="val" id="pa">–</div>
+      <div class="sub">越低越好</div>
+    </div>
+    <div class="card" style="--c:var(--fl)">
+      <div class="lbl">滤镜损失 fl</div>
+      <div class="val" id="fl" style="color:var(--fl)">–</div>
+      <div class="sub">越低越好（学习放什么滤镜）</div>
+    </div>
+    <div class="card" style="--c:var(--ez)">
+      <div class="lbl">缓动损失 ez</div>
+      <div class="val" id="ez" style="color:var(--ez)">–</div>
+      <div class="sub">越低越好（学习用哪种缓动）</div>
+    </div>
+    <div class="card gpu">
+      <div class="lbl">显存 / GPU 利用率</div>
+      <div class="val" id="gpu">–</div>
+      <div class="sub" id="gpusub">RTX 4070</div>
+    </div>
+  </div>
+
+  <div class="barwrap">
+    <div class="barhead"><span>总进度</span><b id="pct">0%</b></div>
+    <div class="bar"><i id="bar"></i></div>
+  </div>
+
+  <div class="chartcard">
+    <h3>损失曲线（Loss）</h3>
+    <div class="legend">
+      <span><i class="dot" style="background:var(--ev)"></i>ev 事件损失</span>
+      <span><i class="dot" style="background:var(--pa)"></i>pa 参数损失</span>
+      <span><i class="dot" style="background:var(--fl)"></i>fl 滤镜损失</span>
+      <span><i class="dot" style="background:var(--ez)"></i>ez 缓动损失</span>
+    </div>
+    <canvas id="chart"></canvas>
+  </div>
+
+  <div class="logcard">
+    <h3><span>训练日志（实时）</span><span id="loglines" class="sub"></span></h3>
+    <div id="log">连接中…</div>
+  </div>
+
+  <div class="btns">
+    <button id="stop" class="stop">⏹ 停止训练</button>
+    <button id="refresh">↻ 立即刷新</button>
+  </div>
+  <div class="err" id="err"></div>
+</div>
+
+<script>
+const EV_C=[255,123,114], PA_C=[210,168,255], FL_C=[86,211,100], EZ_C=[88,166,255];
+const cv=document.getElementById('chart'), ctx=cv.getContext('2d');
+let hist=[]; // {ep,step,ev,pa,fl,ez}
+
+function resize(){const r=cv.getBoundingClientRect();const dpr=window.devicePixelRatio||1;
+  cv.width=r.width*dpr;cv.height=r.height*dpr;ctx.setTransform(dpr,0,0,dpr,0,0);draw();}
+window.addEventListener('resize',resize);
+
+function draw(){
+  const W=cv.width/(window.devicePixelRatio||1), H=cv.height/(window.devicePixelRatio||1);
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='#2a313c';ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=H*i/4;ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  if(hist.length<2)return;
+  const evs=hist.map(h=>h.ev), pas=hist.map(h=>h.pa);
+  const fls=hist.map(h=>h.fl), ezs=hist.map(h=>h.ez);
+  const maxV=Math.max(0.001,...evs,...pas,...fls,...ezs), minV=0;
+  const n=hist.length;
+  const X=i=>n<=1?0:W*i/(n-1);
+  const Y=v=>H-(v-minV)/(maxV-minV)*H*0.92-4;
+  function line(arr,c){
+    ctx.strokeStyle=`rgb(${c[0]},${c[1]},${c[2]})`;ctx.lineWidth=2;ctx.beginPath();
+    arr.forEach((v,i)=>{const x=X(i),y=Y(v);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.stroke();
+  }
+  line(evs,EV_C);line(pas,PA_C);line(fls,FL_C);line(ezs,EZ_C);
+}
+
+function setText(id,t){document.getElementById(id).textContent=t;}
+function setStatus(running){
+  const s=document.getElementById('status');
+  s.className='status '+(running?'run':'idle');
+  s.textContent=running?'训练中':'空闲';
+}
+
+async function poll(){
+  try{
+    const r=await fetch('/api/vfx_progress',{cache:'no-store'});
+    const d=await r.json();
+    setStatus(d.running);
+    if(d.last){
+      setText('epoch',`${d.last.epoch} / ${d.total_epochs||'?'}`);
+      setText('epsub', d.last.step!=null?`步 step ${d.last.step} / ${d.total_steps||'?'}` : '本轮汇总');
+      setText('ev', d.last.ev.toFixed(4));
+      setText('pa', d.last.pa.toFixed(4));
+      setText('fl', d.last.fl!=null?d.last.fl.toFixed(4):'–');
+      setText('ez', d.last.ez!=null?d.last.ez.toFixed(4):'–');
+    }
+    if(d.gpu_mem!=null){
+      setText('gpu', `${d.gpu_mem} MiB`);
+      setText('gpusub', `利用率 ${d.gpu_util!=null?d.gpu_util+'%':'?'}`);
+    }else{ setText('gpu','–'); setText('gpusub','无 GPU 数据'); }
+    // progress
+    let pct=0;
+    if(d.total_epochs){
+      const ep=(d.last?d.last.epoch:0), st=(d.last&&d.last.step!=null?d.last.step:0);
+      const ts=d.total_steps||1;
+      pct=Math.min(100, ((ep-1)+st/ts)/d.total_epochs*100);
+    }
+    setText('pct', pct.toFixed(1)+'%');
+    document.getElementById('bar').style.width=pct+'%';
+    // history for chart (use last value per epoch as anchor; keep step-level)
+    if(Array.isArray(d.history)&&d.history.length){
+      hist=d.history.map(h=>({ep:h[0],step:h[1],ev:h[2],pa:h[3],fl:h[4],ez:h[5]}));
+      draw();
+    }
+    if(d.log){
+      const el=document.getElementById('log');
+      el.textContent=d.log;
+      el.scrollTop=el.scrollHeight;
+      setText('loglines', `${d.log.split('\n').length} 行`);
+    }
+    document.getElementById('err').textContent='';
+  }catch(e){
+    document.getElementById('err').textContent='获取失败：'+e.message;
+  }
+}
+
+document.getElementById('refresh').onclick=poll;
+document.getElementById('stop').onclick=async()=>{
+  if(!confirm('确定停止当前 VFX 训练？已在训练的权重不会保存。'))return;
+  try{
+    await fetch('/api/vfx_force_stop',{method:'POST'});
+    setText('err','已发送停止指令，请稍候刷新。');
+    setTimeout(poll,2000);
+  }catch(e){ setText('err','停止失败：'+e.message); }
+};
+
+resize();
+poll();
+setInterval(poll,1500);
+</script>
+</body>
+</html>
