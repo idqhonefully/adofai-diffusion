@@ -12,11 +12,11 @@
 
 - **自动踩点**：用神经网络（OnsetNet）从音乐里听出该踩点的位置，比老式的"音头检测"准得多。
 - **自动编花样**：用 VAE + 扩散模型在踩点基础上生成旋转（Twirl）。
-- **音轨分离 + 多选**：用 Demucs 把歌拆成鼓点/贝斯/旋律/人声/伴奏，你可以只盯某条音轨踩点，或勾选多条合并后一起喂给 AI。
+- **音轨分离 + 多选**：用 Demucs 做 6 通道分离（鼓/贝斯/其他/人声/原曲/伴奏），你可以只盯某条音轨踩点，或勾选多条合并后一起喂给 AI。
 - **网页界面**：上传音频 → 分解音轨 → 选音轨 → 一键生成，带梅尔频谱预览图，生成的谱面可直接下载。建议用原版音频，因为分离后音质较差，容易导致虚踩。
 - **可训练**：自带训练脚本，用自己的谱面数据把模型训得更好（尤其针对你常做的曲风，或者你训练数据的曲风）。
 
-> 注：当前版本**不生成**运镜/变色/闪光等视觉特效，只做"脚步"（踩点 + 旋转）。后续更新会先在群内测试再开源
+> 注：当前版本已包含 VFXNet 生成的视觉特效（运镜/变色/闪光等），与 Twirl 翻身走线一同生成。
 
 ---
 
@@ -30,6 +30,8 @@ adofai-diffusion/
 ├── README_EN.md         # 英文文档
 ├── LICENSE              # MIT 许可证
 ├── .gitignore
+├── data/
+│   └── checkpoints/     # 模型权重放这里（仅 .gitkeep 占位，权重另行分发）
 ├── train/               # 放你自己的训练数据（结构见 train/README.md），不进 git
 └── app/
     ├── web_server.py        # 网页后端（生成 + 训练两个页签）
@@ -38,19 +40,33 @@ adofai-diffusion/
     ├── timing_engine.py     # 计时引擎（角度 <-> 时间，支持 Twirl/SetSpeed 等）
     ├── validate_beat_align.py # 校验踩点对齐
     ├── webui/
-    │   └── index.html       # 前端页面（选音频 → 选音轨 → 生成）
+    │   ├── index.html       # 前端主页面（选音频 → 选音轨 → 生成）
+    │   ├── shape_monitor.html # 形状模型训练监控页
+    │   ├── vfx_train.html   # 视觉特效训练页
+    │   └── icon.png         # 窗口/网页图标
     └── training/
         ├── inference_stage2.py  # 生成主流程：音频 → 踩点 + 扩散 → .adofai
         ├── onset_net.py         # 踩点模型 OnsetNet 定义
         ├── train_onset.py       # 训练踩点模型
-        ├── dataset.py           # 扩散训练数据集（读 train/ 配对）
-        ├── train_stage2.py      # 训练 VAE + 扩散（风格模型）
+        ├── shape_model.py       # 走线/形状模型（zigzag 等）
+        ├── train_shape.py       # 训练形状模型
         ├── vae.py / diffusion.py# VAE 与 DDPM 扩散模型定义
+        ├── train_stage2.py      # 训练 VAE + 扩散（风格模型）
+        ├── vfx_net.py           # 视觉特效模型 VFXNet 定义
+        ├── train_vfx.py         # 训练视觉特效模型
+        ├── effects_schema.py    # 特效动作/参数 schema（build_action）
+        ├── apply_vfx.py         # 把特效参数写入 .adofai
         ├── chart_repr.py        # 谱面 <-> 稠密表示的互相转换
         ├── demucs_mel.py        # 用 Demucs 做音源分离 + 梅尔特征
         ├── separate_all.py      # 分离全部音轨（网页"分解音频"用）
         ├── preview_track.py     # 导出单条分离音轨供试听
-        └── eval_onset.py        # 踩点模型评测
+        ├── dataset.py           # 扩散训练数据集（读 train/ 配对）
+        ├── eval_onset.py        # 踩点模型评测
+        ├── device_util.py       # GPU/设备工具
+        ├── extract_vfx.py       # 抽取视觉特效训练样本
+        ├── precompute_vfx_mel.py# 预计算特效梅尔特征
+        ├── beat_this_align.py   # 节拍对齐工具
+        └── strip_flash.py       # 去除残留闪光帧工具
 ```
 
 ---
@@ -126,7 +142,7 @@ venv\Scripts\python.exe app\training\train_stage2.py
 ## 生成谱面（三步）
 
 1. **第一步 · 选音频**：在网页"生成"页拖入或选择一首歌。
-2. **第二步 · 选分解后的音轨**：点「分解音频」，等它把歌拆成 5 条（鼓点/贝斯/旋律钢琴/人声/伴奏去人声），每条带试听播放条和复选框（建议用原音频）。
+2. **第二步 · 选分解后的音轨**：点「分解音频」，等它把歌拆成 6 条（鼓/贝斯/其他/人声/原曲/伴奏），每条带试听播放条和复选框（建议用原音频）。
    - 勾「原音频」就禁用所有分解轨；勾任意分解轨就禁用「原音频」（互斥）。
    - 分解轨可以**多选**。
 3. **第三步 · 生成**：
@@ -172,7 +188,7 @@ A：已修复（旧版有同名文件冲突）。用最新代码即可；若仍�
 A：训练/推理都在吃显卡。没独显用 CPU 会非常慢。
 
 **Q：能加运镜/特效吗？**
-A：当前版本只做踩点和旋转，不含视觉特效。属于后续增强。
+A：已支持 VFXNet 视觉特效。生成时在「生成」页勾选「生成时加入视觉特效」即可；不勾则只生成踩点 + Twirl 走线。
 
 ---
 
