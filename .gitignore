@@ -9,24 +9,32 @@ venv/
 venv_*/
 python/
 python313/
-torch_hub/
 
-# --- 数据 / 模型权重 / 生成物（不进仓库）---
-data/
-train_data/
+# --- 数据 / 训练数据（不进仓库，只放行目录说明）---
+# 权重从 Releases 下载后放进 data/checkpoints/，见 data/README.md；
+# 训练数据放 train_data/，例子见 train_data/README.md。
+data/*
+!data/README.md
+train_data/*
+!train_data/README.md
 
-# 训练数据里的音频与谱面：保留 train/ 目录本身，但忽略大文件
-train/**/*.ogg
-train/**/*.mp3
-train/**/*.wav
-train/**/*.adofai
-train/**/*.npy
+# --- 从 Releases 下载的权重压缩包：别手滑提交进仓库（41.5 MB / 38.1 MB）---
+data.zip
+adofai_model_weights.zip
 
-# 其它生成/缓存产物
+# --- 其它生成 / 缓存产物 ---
 *.npy
 *.wav
 *.mp3
 *.png
+
+# --- beat_this 权重：这一个是故意入库的（首跑免联网，见 NOTICE），其余缓存忽略 ---
+torch_hub/*
+!torch_hub/hub/
+torch_hub/hub/*
+!torch_hub/hub/checkpoints/
+torch_hub/hub/checkpoints/*
+!torch_hub/hub/checkpoints/beat_this-small0.ckpt
 
 # --- 日志 ---
 *.log

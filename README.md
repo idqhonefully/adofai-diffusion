@@ -7,17 +7,60 @@
 
 - 界面：原生 GUI（Windows / WebView2）+ 网页端（跨平台，Docker 可直接部署）
 - 模型：Demucs(htdemucs) + Beat This! + OnsetNet(CNN+BiGRU) + ChartVAE + DDPM + ShapeModel + VFXNet
-- 权重：7 个 `.pt`（约 45 MB）随仓库发布，克隆即用
+- 权重：7 个 `.pt` 打包在 [Releases v7](https://github.com/idqhonefully/adofai-diffusion/releases/tag/v7)
+  的 `data.zip` 里（压缩包 41.5 MB / 解压 44.7 MB），**不在仓库中**，克隆后需手动下载放进 `data/checkpoints/`
+  （见「一、快速开始」第 0 步）
 
 ---
 
 ## 一、快速开始
 
+### 0) 先下载权重（必做）
+
+**仓库里没有模型权重**，权重单独放在发行版（Releases）里：
+
+- 当前版本：**[v7 — 预训练模型权重](https://github.com/idqhonefully/adofai-diffusion/releases/tag/v7)** →
+  附件 `data.zip`（41.5 MB，解压后 44.7 MB，含 7 个 `.pt`）
+- 旧的 `v1.0` 只有 3 个模型（`onset_net.pt` / `vae.pt` / `ddpm.pt`），**建议直接用 v7**
+- 下载页：<https://github.com/idqhonefully/adofai-diffusion/releases>
+
+压缩包内部顶层就是 `checkpoints/` 目录，所以**必须解压到 `data/` 里面**，最终得到
+`data/checkpoints/*.pt`。如果解压到仓库根目录，会得到 `<仓库根>/checkpoints/` —— 那个位置
+`app/paths.py` 不会去找，等于没装。
+
+```bat
+:: Windows（CMD/批处理）：先从 1) 克隆好仓库，然后在仓库根目录执行下面几行。
+:: Win10 1803+ 自带 curl.exe 和 tar（bsdtar，能直接解 zip）。
+:: PowerShell 里请写成 curl.exe（PS 5.1 的 curl 是 Invoke-WebRequest 别名，参数不一样）。
+mkdir data
+curl.exe -L -o data.zip https://github.com/idqhonefully/adofai-diffusion/releases/download/v7/data.zip
+tar -xf data.zip -C data
+del data.zip
+```
+
+```bash
+# Linux / macOS，在仓库根目录执行（没有 curl 就把 curl -L -o data.zip 换成 wget -O data.zip）
+mkdir -p data
+curl -L -o data.zip https://github.com/idqhonefully/adofai-diffusion/releases/download/v7/data.zip
+unzip -o data.zip -d data && rm data.zip
+```
+
+自检：`data/checkpoints/` 下应该正好是这 7 个文件（Windows 用 `dir data\checkpoints`）：
+
+```
+ddpm.pt  onset_net.pt  onset_net_melody.pt  onset_net_vocal.pt  shape_model.pt  vae.pt  vfx_net.pt
+```
+
+- 缺 `onset_net.pt` / `vae.pt` / `ddpm.pt`（核心）→ 生成链路不可用，网页端的模型状态徽章会标成缺失。
+- 只缺可选权重（`onset_net_melody.pt` / `onset_net_vocal.pt` / `shape_model.pt` / `vfx_net.pt`）
+  → 会静默降级，功能照跑但效果打折，明细见「四、模型清单」。
+
 ### 1) Windows 源码直跑
 
 ```bat
-git clone https://github.com/<你的用户名>/adofai-diffusion.git
+git clone https://github.com/idqhonefully/adofai-diffusion.git
 cd adofai-diffusion
+:: 权重别忘了解压到 data\checkpoints\（见上面第 0 步）
 py -3.13 -m venv venv
 venv\Scripts\python.exe -m pip install -r requirements.txt
 venv\Scripts\python.exe app\web_server.py --port 8420
@@ -40,8 +83,9 @@ GUI 只做窗口壳，生成/训练逻辑全部复用 `app/web_server.py`，改 
 ### 3) Docker（Linux，CPU 推理）
 
 ```bash
-git clone https://github.com/<你的用户名>/adofai-diffusion.git
+git clone https://github.com/idqhonefully/adofai-diffusion.git
 cd adofai-diffusion
+# 权重先进 ./data（见第 0 步），容器靠 volume 读它，不装权重容器里同样生成不出谱面
 docker compose up -d --build
 # 或手动：
 #   docker build -t adofai-diffusion .
@@ -52,8 +96,10 @@ docker compose up -d --build
 
 要点：
 
-- 镜像只装依赖 + 源码 + `beat_this` 权重（8 MB）；`data/`、`train_data/` 用 volume 挂载，
+- 镜像只装依赖 + 源码 + `beat_this` 权重（8 MB，随仓库的 `torch_hub/`）；
+  **镜像内不含自己训练的谱面模型**，`data/`、`train_data/` 用 volume 挂载，
   容器里对应 `ADOFAI_DATA_DIR=/app/data`、`ADOFAI_TRAIN_DIR=/app/train_data`。
+  所以宿主机的 `./data/checkpoints/` 必须先按第 0 步放好 v7 权重。
 - 训练出来的权重写进挂载卷，重启不丢。
 - 有 NVIDIA GPU 时：把 `requirements.txt` 里的 `torch/torchaudio` 换成 cu 索引版本，
   并在 compose 里加 `deploy.resources.reservations.devices`（`Dockerfile` 顶部有注释）。
@@ -96,9 +142,18 @@ python app/training/train_vfx.py --data train_data --cache train_data/.vfx_cache
 产物默认进运行时目录 `checkpoints/`，网页端和 GUI 的训练页签有实时日志监控。
 GPU 显存不够时，`train_stage2.py` 支持用 `VAE_EPOCHS` / `DDPM_EPOCHS` 控制轮数。
 
+> **注意**：几个训练脚本各自的默认数据目录**都不存在于仓库里**（`train_onset.py` 默认
+> `<根>/train_single/melody`、`train_shape.py` / `train_stage2.py` 默认 `<根>/train`、
+> `train_vfx.py` 默认 `<根>/train_vfx`），仓库里提供的是 `train_data/`。
+> 所以上面每条命令都显式传了目录，自己跑的时候别省这个参数；
+> `ADOFAI_TRAIN_DIR=train_data` 只对 `train_onset.py` / `train_stage2.py` 生效。
+
 ---
 
-## 四、模型清单（`data/checkpoints/`）
+## 四、模型清单与权重下载（`data/checkpoints/`）
+
+这 7 个权重**不随源码仓库分发**，全部来自发行版：**Releases [v7](https://github.com/idqhonefully/adofai-diffusion/releases/tag/v7)**
+的 `data.zip`（41.5 MB，解压 44.7 MB）。放置位置与自检见「一、快速开始」第 0 步。
 
 | 权重文件 | 模型 | 作用 | 必需性 |
 |---|---|---|---|
@@ -108,6 +163,17 @@ GPU 显存不够时，`train_stage2.py` 支持用 `VAE_EPOCHS` / `DDPM_EPOCHS` �
 | `onset_net_vocal.pt` | OnsetNet 变体 | 分轨踩点（人声轨） | 可选，缺则回退标准模型 |
 | `shape_model.pt` | ShapeModel (GRU) | 每格左/右转（摆形状） | 可选，缺则几何贪心 |
 | `vfx_net.pt` | VFXNet (多任务头) | 视觉特效预测 | 可选，缺则跳过注入 |
+
+发行版对照（选哪个）：
+
+| 发行版 | 附件 | 含模型 | 建议 |
+|---|---|---|---|
+| `v7`（2026-09-14） | `data.zip`（41.5 MB） | 上表全部 7 个 | **用这个** |
+| `v1.0`（2026-08-10） | `adofai_model_weights.zip`（38.1 MB） | 仅 `onset_net.pt` / `vae.pt` / `ddpm.pt` | 旧版，缺 4 个可选权重，不建议 |
+
+> 两个包的内部结构不一样：`v7` 的包里是 `checkpoints/` 目录（解压到 `data/` 即可）；
+> `v1.0` 的包里是散的 3 个 `.pt`（要自己放进 `data/checkpoints/`）。
+> 装好之后网页端的模型状态徽章会标注每个权重的来源（内置 / 已训练）。
 
 ---
 
@@ -119,7 +185,7 @@ GPU 显存不够时，`train_stage2.py` 支持用 `VAE_EPOCHS` / `DDPM_EPOCHS` �
 1) ADOFAI_DATA_DIR           显式指定（容器挂载 / 覆盖）
 2) 运行时目录  %LOCALAPPDATA%\ADOFAI_Diffusion\checkpoints   ← 你自己训练的权重
    （Linux/macOS 下取 ~/，容器里 compose 已把 LOCALAPPDATA 指到 /app/data）
-3) 便携内置    data/checkpoints                               ← 出厂权重（不随 env 变）
+3) 便携内置    data/checkpoints                               ← 出厂权重（Releases v7 的 data.zip，不随 env 变）
 ```
 
 配套规则：
@@ -130,6 +196,17 @@ GPU 显存不够时，`train_stage2.py` 支持用 `VAE_EPOCHS` / `DDPM_EPOCHS` �
   （`web_server._model_status_payload`、`gui_main.send_model_status`）都走同一个 resolver。
 - 语义是「内置 vs 已训练」分层：你训练出来的权重优先生效；删掉运行时目录即恢复出厂。
   前端模型状态徽章会标注来源（内置 / 已训练）。
+
+三级目录都没命中时 `resolve_checkpoint()` 返回 `None`（文件不存在或小于 1 KB 都算没有）。
+不确定权重装对没有，可以就地跑一句自查（不需要装 torch）：
+
+```bash
+python -c "import sys; sys.path.insert(0,'app'); from paths import resolve_checkpoint as r; print({f: (str(r(f)) if r(f) else '缺失') for f in ['onset_net.pt','vae.pt','ddpm.pt','onset_net_melody.pt','onset_net_vocal.pt','shape_model.pt','vfx_net.pt']})"
+```
+
+七个全部打印出路径才算装齐；出现 `缺失` 就去「一、快速开始」第 0 步重新解压一遍
+（最常见的原因是解压到了仓库根目录的 `checkpoints/` 而不是 `data/checkpoints/`）。
+Windows 上把 `python` 换成 `venv\Scripts\python.exe` 即可。
 
 容器/多实例常用环境变量：
 
@@ -162,7 +239,9 @@ adofai-diffusion/
 │       ├── apply_vfx.py        # VFX 注入
 │       └── train_*.py          # onset / stage2(vae+ddpm) / shape / vfx
 ├── gui/                        # 原生 GUI 壳（Windows：Win32 Mica 窗口 + WebView2）
-├── data/checkpoints/           # 出厂权重（7 个 .pt）
+├── data/                       # 运行时数据（不入库；权重需从 Releases 下载）
+│   ├── README.md               # 权重放哪 + 自检清单
+│   └── checkpoints/            # 出厂权重（7 个 .pt，来自 Releases v7）
 ├── torch_hub/                  # beat_this 的 ONSET 权重（免首跑联网）
 ├── train_data/                 # ← 训练数据放这里（见第三节）
 ├── requirements.txt            # GPU/CPU 通用（torch 默认 cu128 轮子）
@@ -214,6 +293,8 @@ adofai-diffusion/
 
 ## 九、已知边界
 
+- **仓库不含模型权重**：必须在 GitHub Releases（当前 `v7`）下载 `data.zip` 并解压到
+  `data/`，否则核心生成链路（踩点 + 扩散）不可用，见「一、快速开始」第 0 步。
 - GUI 壳依赖 Win32/WebView2，**只有 Windows 能用**；跨平台请用网页端或 Docker。
 - CPU 推理可用但慢（一首 3 分钟的歌，分离 + 扩散约数分钟量级）。
 - 生成的谱面质量强依赖训练语料；开箱权重是在有限曲目上训练的，换曲风建议自行微调。
@@ -224,6 +305,8 @@ adofai-diffusion/
 ## 十、许可与致谢
 
 - 本项目源码采用 **Apache-2.0** 许可（见 `LICENSE`）。
+- 模型权重不随源码仓库分发，统一通过
+  [Releases](https://github.com/idqhonefully/adofai-diffusion/releases) 发布（当前 `v7`）。
 - 依赖与转录的上游项目见 `NOTICE`，各自许可仍归上游。
 - 特别提示：**Demucs 预训练权重**与其上游数据受音乐版权约束，本仓库仅按上游条款引用；
   用分离结果训练出的模型权重如需再分发，请自行确认合规。

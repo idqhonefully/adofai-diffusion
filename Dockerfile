@@ -11,7 +11,8 @@
 #     已在下面 ENV 里设好，docker run 不用重复传；docker-compose.yml 也已同步。）
 #
 # 说明：
-# - 模型权重 *.pt 不打进镜像：放到宿主机 ./data/checkpoints/ 挂载进来。
+# - 模型权重 *.pt 不打进镜像：从 GitHub Releases 下载 data.zip（当前 v7）后放到
+#   宿主机 ./data/checkpoints/ 再挂载进来（下载与解压见 README「一、快速开始」第 0 步）。
 # - beat_this 的 ONSET 权重（约 8 MB）随仓库提供并拷进镜像（torch_hub/）；
 #   demucs 权重在 pip 包内，无需下载。
 # - 无 GPU 时直接跑，代码会自动退回 CPU（慢但可用）。

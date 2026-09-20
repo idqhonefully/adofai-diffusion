@@ -15,7 +15,8 @@ services:
     ports:
       - "8420:8420"
     volumes:
-      # 模型权重 + 运行缓存（*.pt 放 data/checkpoints，demucs 分离结果落这里持久化）
+      # 模型权重 + 运行缓存（*.pt 放 data/checkpoints —— 需先从 GitHub Releases 下载
+      # data.zip，见 README 第 0 步；demucs 分离结果落这里持久化）
       - ./data:/app/data
       # 训练数据集（wav + .adofai 谱面）
       - ./train_data:/app/train_data
