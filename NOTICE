@@ -1,0 +1,31 @@
+Adofai-Chart-Generator（开源版）
+Copyright 2026 iDQhonefully and Adofai-Chart-Generator contributors
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full license text.
+
+--------------------------------------------------------------------------------
+第三方组件（随包分发，各有各的许可；索引见 THIRD-PARTY.md）
+--------------------------------------------------------------------------------
+
+* chartgen/ — 修改版 fork of LINIX099/adofai-chart-generator
+  (https://github.com/LINIX099/adofai-chart-generator)，
+  MIT License，Copyright 2026 adocharter。
+  本项目对其做了定制（保留 sidecar/server.py 的 _projects 定制、接入 BSR 分离等），
+  详情与第三方许可见 chartgen/LICENSE 与 chartgen/THIRD-PARTY.md。
+* .NET 10 / WPF / WebView2 — Microsoft（见 THIRD-PARTY.md）
+* ONNX Runtime — MIT
+* ffmpeg — LGPL-2.1+ / GPL（详见 EXTERNAL_ASSETS.md，二进制不进仓库）
+* numpy / scipy / librosa / soundfile — BSD / ISC
+* Demucs / BS-Roformer（音频分离权重）— MIT（权重文件不进仓库，见 EXTERNAL_ASSETS.md）
+* adofai-player.js（预览播放器，vendored）— 上游 Re_ADOJAS，MIT（见 THIRD-PARTY.md）
+* Python 运行时 — PSF License（不进仓库，见 EXTERNAL_ASSETS.md）
+
+--------------------------------------------------------------------------------
+说明
+--------------------------------------------------------------------------------
+
+本程序生成 `.adofai` 谱面文件（纯文本 JSON），由用户在自己的 ADOFAI 游戏里打开。
+本程序**不包含** ADOFAI 游戏本体，也不分发其美术资源与音频。
+「A Dance of Fire and Ice」是 7th Beat Games 的商标；本项目与其**无隶属关系**，
+也未获其背书。

@@ -1,0 +1,57 @@
+# ===== 模型权重 / 大二进制（版权 + 体积，见 EXTERNAL_ASSETS.md）=====
+*.onnx
+*.pt
+*.ckpt
+*.bin
+weights/
+models/
+__pycache__/
+*.pyc
+
+# ===== 音频 / MIDI / 媒体（版权）=====
+*.ogg
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.mid
+*.midi
+*.bdg
+*.zip
+
+# ===== 运行时（不进仓库）=====
+audio-sep/runtime/
+audio-sep/ffmpeg/
+audio-sep/**/*.onnx
+chartgen/app.asar
+chartgen/samples/
+
+# ===== 输出 / 产物 =====
+output/
+gui/output/
+app-cs/out/
+app-cs/bin/
+app-cs/obj/
+**/out_prev_backup/
+**/_versions/
+**/_archive/
+
+# ===== 日志 / 缓存 / 调试 =====
+*.log
+gui_debug*
+__load_dump.json
+gui/__pycache__/
+**/__pycache__/
+
+# ===== 头像源（含真人照片，不进仓库）=====
+pict/
+
+# ===== 编辑器 / 系统 =====
+.DS_Store
+Thumbs.db
+*.user
+.vs/
+.idea/
+
+# ===== node =====
+node_modules/
