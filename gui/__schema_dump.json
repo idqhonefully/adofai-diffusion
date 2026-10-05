@@ -1,0 +1,1500 @@
+{
+ "ok": true,
+ "groups": [
+  {
+   "id": "file",
+   "title": "① 文件"
+  },
+  {
+   "id": "tracks",
+   "title": "② 主轨（勾选要采音的轨，可多选）"
+  },
+  {
+   "id": "onset",
+   "title": "③ 采音"
+  },
+  {
+   "id": "xk",
+   "title": "③b 采bpm（xk base · 大直线）"
+  },
+  {
+   "id": "solve",
+   "title": "④ 求解 / 几何"
+  },
+  {
+   "id": "fit",
+   "title": "④b 去噪 / 直拟合（时序优先）"
+  },
+  {
+   "id": "export",
+   "title": "⑤ 时序 / 导出"
+  },
+  {
+   "id": "chartview",
+   "title": "⑥ 谱面预览（偏移修正）"
+  },
+  {
+   "id": "fallingview",
+   "title": "下落式 / 路径"
+  }
+ ],
+ "fields": [
+  {
+   "key": "file_info",
+   "group": "file",
+   "label": "当前文件",
+   "type": "info",
+   "default": "未加载",
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": ""
+  },
+  {
+   "key": "dp_tol",
+   "group": "tracks",
+   "label": "双押判定窗口",
+   "type": "float",
+   "default": 45.0,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "双押轨音头与主音相差多少 ms 内算「同一下」",
+   "min": 1.0,
+   "max": 400.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "dp_mode",
+   "group": "tracks",
+   "label": "写法",
+   "type": "combo",
+   "default": 1,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "**角度双押**（默认，走规定写法表，时序最准）/ **中旋双押**（老写法，整砖折返；密集音上会有几毫秒量化误差）",
+   "options": [
+    {
+     "label": "中旋双押",
+     "value": 0
+    },
+    {
+     "label": "角度双押",
+     "value": 1
+    }
+   ]
+  },
+  {
+   "key": "dp_reserve",
+   "group": "tracks",
+   "label": "预留槽位",
+   "type": "bool",
+   "default": true,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "角度双押专用：求解前先替双押留好身位，保证「调速落在平格上」。关掉 = 只靠事后插入（撞到图形就借道或报丢）"
+  },
+  {
+   "key": "dp_theta",
+   "group": "tracks",
+   "label": "薄角 θ",
+   "type": "float",
+   "default": 0.0,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "双押拆出来的薄格角度。**0 = 自动**。★ **只有在「使用固定双押角度」关掉时才生效** —— 开着时角度由规定写法表决定，**不能自定义**",
+   "min": 0.0,
+   "max": 90.0,
+   "step": 1.0,
+   "suffix": "°"
+  },
+  {
+   "key": "use_fixed_dp_angle",
+   "group": "tracks",
+   "label": "使用固定双押角度",
+   "type": "check",
+   "default": true,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "★ 双押角度按**规定写法表**取（不同 bpm 窗口用不同规定写法），**不按毫秒计算、不能自定义角度**。关掉 = 回到老口径（薄角 θ / 偏移预算 反解）"
+  },
+  {
+   "key": "three_press_mode",
+   "group": "tracks",
+   "label": "三押",
+   "type": "combo",
+   "default": 0,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "同一时刻有 2 条多押轨同时响时：拆成 3 格 `[θ₁,θ₂,余量]` / 只按双押插一格 / 整组不插。**只在「使用固定双押角度」开着时生效**（老口径没有押数概念）。不管选哪档，报告里都会写清「押数 3 的有几处、怎么处理的」",
+   "options": [
+    {
+     "label": "拆三押（默认）",
+     "value": 0
+    },
+    {
+     "label": "不拆（按双押插一格）",
+     "value": 1
+    },
+    {
+     "label": "跳过（连双押也不插）",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "key": "dp_skew_max_ms",
+   "group": "tracks",
+   "label": "偏移预算",
+   "type": "float",
+   "default": 25.0,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "双押两下的间隔 Δ 必须 ≤ 它（**按每格自己的 bpm 算，慢速档会放大**）。程序据此反解薄角 θ，bpm 越低 θ 越小。**0 = 关掉预算**（固定 15°/30°）。★ **只有在「使用固定双押角度」关掉时才生效** —— 开着时角度由规定写法表决定，Δ 只作为**情报**上报（不当判据）",
+   "min": 0.0,
+   "max": 200.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "sub_gap_ms",
+   "group": "tracks",
+   "label": "插空阈值",
+   "type": "float",
+   "default": 600.0,
+   "target": "",
+   "scope": "tracks",
+   "schedule": true,
+   "help": "次级轨只在**主轨连续空白超过这么久**的地方补音。**调到 0 = 不做缝隙判断（等价于并集）**",
+   "min": 0.0,
+   "max": 5000.0,
+   "step": 50.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "merge_ms",
+   "group": "onset",
+   "label": "合并窗口",
+   "type": "float",
+   "default": 30.0,
+   "target": "OnsetParams.merge_ms",
+   "scope": "solve",
+   "schedule": true,
+   "help": "间隔小于此值的音合并成一次按键",
+   "min": 0.0,
+   "max": 500.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "merge_anchor",
+   "group": "onset",
+   "label": "合并取点",
+   "type": "combo",
+   "default": "first",
+   "target": "OnsetParams.merge_anchor",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "options": [
+    {
+     "label": "first（取最早）",
+     "value": "first"
+    },
+    {
+     "label": "loudest（取力度最大）",
+     "value": "loudest"
+    }
+   ]
+  },
+  {
+   "key": "min_velocity",
+   "group": "onset",
+   "label": "最小力度",
+   "type": "int",
+   "default": 1,
+   "target": "OnsetParams.min_velocity",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 0,
+   "max": 127
+  },
+  {
+   "key": "min_interval_ms",
+   "group": "onset",
+   "label": "最小间隔",
+   "type": "float",
+   "default": 0.0,
+   "target": "OnsetParams.min_interval_ms",
+   "scope": "solve",
+   "schedule": true,
+   "help": "相邻按键最小间隔（稀疏化）",
+   "min": 0.0,
+   "max": 2000.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "max_onsets",
+   "group": "onset",
+   "label": "最大音数",
+   "type": "int",
+   "default": 0,
+   "target": "OnsetParams.max_onsets",
+   "scope": "solve",
+   "schedule": true,
+   "help": "0 = 不限",
+   "min": 0,
+   "max": 200000
+  },
+  {
+   "key": "pitch_lo",
+   "group": "onset",
+   "label": "音高下限",
+   "type": "int",
+   "default": 0,
+   "target": "OnsetParams.pitch_lo",
+   "scope": "solve",
+   "schedule": true,
+   "help": "换轨时会被自动改写为该轨（或所选轨并集）的音高下限",
+   "min": 0,
+   "max": 127
+  },
+  {
+   "key": "pitch_hi",
+   "group": "onset",
+   "label": "音高上限",
+   "type": "int",
+   "default": 127,
+   "target": "OnsetParams.pitch_hi",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 0,
+   "max": 127
+  },
+  {
+   "key": "auto_bpm",
+   "group": "solve",
+   "label": "自动选基准 BPM 与参考音值",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.base_bpm(auto)",
+   "scope": "solve",
+   "schedule": true,
+   "help": "勾上则 base_bpm 保持 0（由 solve() 内部自动），基准 BPM 框只是显示"
+  },
+  {
+   "key": "quantize_rhythm",
+   "group": "solve",
+   "label": "量化到音值网格（推荐）",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.quantize_rhythm",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "base_bpm",
+   "group": "solve",
+   "label": "基准 BPM",
+   "type": "float",
+   "default": 180.0,
+   "target": "SolveParams.base_bpm",
+   "scope": "solve",
+   "schedule": true,
+   "help": "★ 改这个框 = 明确要自己定 ⇒ 会自动取消上面的「自动选基准 BPM」，你输的值从此不再被自动值覆盖（自动勾着时这框只是显示）。",
+   "min": 10.0,
+   "max": 4000.0,
+   "step": 1.0,
+   "suffix": " BPM"
+  },
+  {
+   "key": "ref_index",
+   "group": "solve",
+   "label": "一条直线 = ",
+   "type": "combo",
+   "default": 0,
+   "target": "SolveParams.beat_beats",
+   "scope": "solve",
+   "schedule": true,
+   "help": "自动 = 0.0；映射见 sidecar/schema.BEAT_BEATS",
+   "options": [
+    {
+     "label": "自动（推荐）",
+     "value": 0
+    },
+    {
+     "label": "1/16 拍",
+     "value": 1
+    },
+    {
+     "label": "1/8 拍",
+     "value": 2
+    },
+    {
+     "label": "1/8 附点",
+     "value": 3
+    },
+    {
+     "label": "1/4 拍",
+     "value": 4
+    },
+    {
+     "label": "1/4 附点",
+     "value": 5
+    },
+    {
+     "label": "1/2 拍",
+     "value": 6
+    },
+    {
+     "label": "1 拍",
+     "value": 7
+    }
+   ]
+  },
+  {
+   "key": "bpm_max",
+   "group": "solve",
+   "label": "BPM 上限",
+   "type": "float",
+   "default": 400.0,
+   "target": "SolveParams.bpm_max",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 60.0,
+   "max": 2000.0,
+   "step": 1.0,
+   "suffix": " BPM"
+  },
+  {
+   "key": "straight_preset",
+   "group": "solve",
+   "label": "直线优先",
+   "type": "combo",
+   "default": 1,
+   "target": "SolveParams.straight_weight",
+   "scope": "solve",
+   "schedule": true,
+   "help": "「一条直线值多少个 SetSpeed 事件」λ：少=3.0 / 平衡=1.5 / 多=0.7",
+   "options": [
+    {
+     "label": "少（省速度事件）",
+     "value": 0
+    },
+    {
+     "label": "平衡（推荐）",
+     "value": 1
+    },
+    {
+     "label": "多（尽量直线）",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "key": "allow_set_speed",
+   "group": "solve",
+   "label": "允许减速档（蜗牛）",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.allow_set_speed",
+   "scope": "solve",
+   "schedule": true,
+   "help": "关掉则行星绝对匀速、长音被夹断（speed_tiers 只留 1）"
+  },
+  {
+   "key": "twirl_index",
+   "group": "solve",
+   "label": "Twirl 策略",
+   "type": "combo",
+   "default": 0,
+   "target": "SolveParams.twirl_mode",
+   "scope": "solve",
+   "schedule": true,
+   "help": "★ UI 顺序 ≠ core 常量顺序，映射见 schema.TWIRL_VALUES",
+   "options": [
+    {
+     "label": "逐步交替（推荐）",
+     "value": 0
+    },
+    {
+     "label": "累积限角",
+     "value": 1
+    },
+    {
+     "label": "逐步打分",
+     "value": 2
+    },
+    {
+     "label": "完全不使用",
+     "value": 3
+    }
+   ]
+  },
+  {
+   "key": "twirl_limit_deg",
+   "group": "solve",
+   "label": "Twirl 阈值",
+   "type": "float",
+   "default": 240.0,
+   "target": "SolveParams.twirl_limit_deg",
+   "scope": "solve",
+   "schedule": true,
+   "help": "累积限角模式：超过它就翻一次",
+   "min": 90.0,
+   "max": 1080.0,
+   "step": 10.0,
+   "suffix": "°"
+  },
+  {
+   "key": "use_templates",
+   "group": "solve",
+   "label": "用节奏型模板（主体路径）",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.use_templates",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "template_only_nonstraight",
+   "group": "solve",
+   "label": "模板只修非直线（保住直线为主）",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.template_only_nonstraight",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "use_pause",
+   "group": "solve",
+   "label": "长休止用 Pause 事件（推荐）",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.use_pause",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "pause_min_beats",
+   "group": "solve",
+   "label": "等待拍阈值",
+   "type": "float",
+   "default": 4.0,
+   "target": "SolveParams.pause_min_beats",
+   "scope": "solve",
+   "schedule": true,
+   "help": "间隔超过这么多拍就改用**暂停节拍**（travel 180 直线 + Pause），而不是让行星减速爬过去。默认 1 = 只要比一拍长就暂停；调到 4 就退回旧行为（1~4 拍的等待会用减速档）",
+   "min": 0.0,
+   "max": 64.0,
+   "step": 0.5,
+   "suffix": " 拍"
+  },
+  {
+   "key": "travel_min",
+   "group": "solve",
+   "label": "最小角度",
+   "type": "float",
+   "default": 20.0,
+   "target": "SolveParams.travel_min",
+   "scope": "solve",
+   "schedule": true,
+   "help": "非双押格的 travel 不许低于它，避免生成过小的角度影响观感。双押薄格（15°/30°）与中旋折返格是机制需要的形状，不受此限",
+   "min": 0.0,
+   "max": 120.0,
+   "step": 5.0,
+   "suffix": "°"
+  },
+  {
+   "key": "closed_bias_index",
+   "group": "solve",
+   "label": "闭合图形",
+   "type": "combo",
+   "default": 1,
+   "target": "SolveParams.closed_figure_bias",
+   "scope": "solve",
+   "schedule": true,
+   "help": "闭合图形 = 一段走完行星回到主轴方向（收得住的花）；不闭合会把朝向带偏，靠后面的格慢慢扭回来。这条是**同分时的偏好**，不会盖过「少换档 / 走直线」",
+   "options": [
+    {
+     "label": "更不倾向",
+     "value": 0
+    },
+    {
+     "label": "不干预（默认）",
+     "value": 1
+    },
+    {
+     "label": "更倾向",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "key": "straighten",
+   "group": "solve",
+   "label": "角度回正",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.straighten",
+   "scope": "solve",
+   "schedule": true,
+   "help": "把长斜轨尽量掰回主轴方向。**只改 Twirl 符号、不动 travel**，时序零影响"
+  },
+  {
+   "key": "straighten_min_run",
+   "group": "solve",
+   "label": "回正：最小斜轨长",
+   "type": "int",
+   "default": 8,
+   "target": "SolveParams.straighten_min_run",
+   "scope": "solve",
+   "schedule": true,
+   "help": "连续多少格偏离主轴才算「值得回正的斜轨」。默认 8 —— 实测很多谱面一段都凑不出来（那种情况下不动手是对的）；想让它更积极就调小",
+   "min": 2,
+   "max": 64,
+   "suffix": " 格"
+  },
+  {
+   "key": "straighten_theta",
+   "group": "solve",
+   "label": "回正：斜轨判定",
+   "type": "float",
+   "default": 20.0,
+   "target": "SolveParams.straighten_theta",
+   "scope": "solve",
+   "schedule": true,
+   "help": "朝向偏主轴超过这个角度才算「斜」",
+   "min": 2.0,
+   "max": 90.0,
+   "step": 1.0,
+   "suffix": "°"
+  },
+  {
+   "key": "aggressive_pick",
+   "group": "solve",
+   "label": "使用激进的采音策略",
+   "type": "check",
+   "default": false,
+   "target": "SolveParams.aggressive_pick",
+   "scope": "solve",
+   "schedule": true,
+   "help": "逐音降级对音：已有图形 → 当前速度档 → 加 Twirl 镜像 → 变速后重跑 → 暂停节拍。关掉 = 现有行为（保持逐字节一致）。打开后会明显更贴拍，代价是变速与暂停节拍可能变多"
+  },
+  {
+   "key": "ladder_outer_mode",
+   "group": "solve",
+   "label": "激进：绕圈偏好",
+   "type": "combo",
+   "default": "auto",
+   "target": "SolveParams.ladder_outer_mode",
+   "scope": "solve",
+   "schedule": true,
+   "help": "速度偏低时优先绕外圈、速度较快时优先绕内圈（分界见下一项）。「优先」不是禁止：同一格先按偏好试，实在不行才用另一半",
+   "options": [
+    {
+     "label": "自动（慢速绕外圈）",
+     "value": "auto"
+    },
+    {
+     "label": "总是绕外圈",
+     "value": "always"
+    },
+    {
+     "label": "总是绕内圈",
+     "value": "never"
+    }
+   ]
+  },
+  {
+   "key": "ladder_outer_cbpm",
+   "group": "solve",
+   "label": "激进：绕圈分界",
+   "type": "float",
+   "default": 400.0,
+   "target": "SolveParams.ladder_outer_cbpm",
+   "scope": "solve",
+   "schedule": true,
+   "help": "自动模式下，cbpm 低于它就优先绕外圈，高于它就优先绕内圈",
+   "min": 60.0,
+   "max": 2000.0,
+   "step": 10.0,
+   "suffix": " cbpm"
+  },
+  {
+   "key": "ladder_tier_order",
+   "group": "solve",
+   "label": "激进：变速优先级",
+   "type": "combo",
+   "default": "straight",
+   "target": "SolveParams.ladder_tier_order",
+   "scope": "solve",
+   "schedule": true,
+   "help": "第 4 级试档位的顺序。保直线优先 = 先找能把这一格走成直线的档",
+   "options": [
+    {
+     "label": "保直线优先",
+     "value": "straight"
+    },
+    {
+     "label": "少换档优先",
+     "value": "switch"
+    },
+    {
+     "label": "内圈优先",
+     "value": "inner"
+    }
+   ]
+  },
+  {
+   "key": "use_snowflake",
+   "group": "solve",
+   "label": "魔法阵（雪花）",
+   "type": "check",
+   "default": false,
+   "target": "SolveParams.use_snowflake",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "snowflake_min_tiles",
+   "group": "solve",
+   "label": "雪花起用",
+   "type": "int",
+   "default": 10,
+   "target": "SolveParams.snowflake_min_tiles",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 4,
+   "max": 400,
+   "suffix": " 格"
+  },
+  {
+   "key": "snowflake_full_tiles",
+   "group": "solve",
+   "label": "雪花 100%",
+   "type": "int",
+   "default": 48,
+   "target": "SolveParams.snowflake_full_tiles",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 8,
+   "max": 2000,
+   "suffix": " 格"
+  },
+  {
+   "key": "snown_index",
+   "group": "solve",
+   "label": "雪花对称",
+   "type": "combo",
+   "default": 0,
+   "target": "SolveParams.snowflake_n_rot",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "options": [
+    {
+     "label": "自动 6~12",
+     "value": 0
+    },
+    {
+     "label": "只要 6 重",
+     "value": 1
+    },
+    {
+     "label": "只要 8 重",
+     "value": 2
+    },
+    {
+     "label": "只要 12 重",
+     "value": 3
+    }
+   ]
+  },
+  {
+   "key": "snowflake_shape",
+   "group": "solve",
+   "label": "雪花形状",
+   "type": "combo",
+   "default": "auto",
+   "target": "SolveParams.snowflake_shape",
+   "scope": "solve",
+   "schedule": true,
+   "help": "花瓣把总转角分摊到各步的方式；自动 = 穷举取最花的一朵",
+   "options": [
+    {
+     "label": "自动（穷举取最花）",
+     "value": "auto"
+    },
+    {
+     "label": "均匀",
+     "value": "uniform"
+    },
+    {
+     "label": "前重",
+     "value": "front"
+    },
+    {
+     "label": "后重",
+     "value": "back"
+    },
+    {
+     "label": "阶梯",
+     "value": "step"
+    },
+    {
+     "label": "锯齿",
+     "value": "zigzag"
+    },
+    {
+     "label": "随机采样",
+     "value": "random"
+    }
+   ]
+  },
+  {
+   "key": "snowflake_min_arms",
+   "group": "solve",
+   "label": "雪花最少步数",
+   "type": "int",
+   "default": 2,
+   "target": "SolveParams.snowflake_min_arms",
+   "scope": "solve",
+   "schedule": true,
+   "help": "一条花瓣至少走几步（整朵 = 2×步数×对称阶数 格）",
+   "min": 2,
+   "max": 24,
+   "suffix": " 步/瓣"
+  },
+  {
+   "key": "snowflake_compact",
+   "group": "solve",
+   "label": "雪花紧凑优先",
+   "type": "check",
+   "default": true,
+   "target": "SolveParams.snowflake_compact",
+   "scope": "solve",
+   "schedule": true,
+   "help": "同分时优先包围盒小的候选（关掉只看「花不花」）"
+  },
+  {
+   "key": "snowflake_uniform_tol_ms",
+   "group": "solve",
+   "label": "雪花等间隔容差",
+   "type": "float",
+   "default": 3.0,
+   "target": "SolveParams.snowflake_uniform_tol_ms",
+   "scope": "solve",
+   "schedule": true,
+   "help": "段内相邻间隔起伏不超过它才算「等间隔段」（下雪花的门槛）",
+   "min": 0.5,
+   "max": 60.0,
+   "step": 0.5,
+   "suffix": " ms"
+  },
+  {
+   "key": "snowflake_random",
+   "group": "solve",
+   "label": "雪花随机形状",
+   "type": "check",
+   "default": false,
+   "target": "SolveParams.snowflake_random",
+   "scope": "solve",
+   "schedule": true,
+   "help": "勾上则不用穷举，按种子随机采样（同一份输入+同一种子仍可复现）"
+  },
+  {
+   "key": "snowflake_seed",
+   "group": "solve",
+   "label": "雪花种子",
+   "type": "int",
+   "default": 20240213,
+   "target": "SolveParams.snowflake_seed",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 0,
+   "max": 2147483647
+  },
+  {
+   "key": "use_position_track",
+   "group": "solve",
+   "label": "轨道位置偏移（叠在一起的圈错开）",
+   "type": "check",
+   "default": false,
+   "target": "SolveParams.use_position_track",
+   "scope": "solve",
+   "schedule": true,
+   "help": "同一位置重复出现的格按「第几圈」逐格错开，一眼数得出循环了几遍。只改渲染、不改几何与时序；**默认关闭** = 所有圈都叠在同一处"
+  },
+  {
+   "key": "pos_track_step",
+   "group": "solve",
+   "label": "错开步长",
+   "type": "float",
+   "default": 0.22,
+   "target": "SolveParams.pos_track_step",
+   "scope": "solve",
+   "schedule": true,
+   "help": "每多一圈向外错开多少格（默认 0.22 ≈ 一格的五分之一强）",
+   "min": 0.02,
+   "max": 1.0,
+   "step": 0.02,
+   "suffix": " 格"
+  },
+  {
+   "key": "pos_track_min_beats",
+   "group": "solve",
+   "label": "错开间隔",
+   "type": "float",
+   "default": 8.0,
+   "target": "SolveParams.pos_track_min_beats",
+   "scope": "solve",
+   "schedule": true,
+   "help": "只有时间上隔得比这更远的重合格才错开。轨道出现动画会提前 8 拍，8 拍以内的重合玩家靠「出现先后」就分得清，不必错开",
+   "min": 0.0,
+   "max": 64.0,
+   "step": 1.0,
+   "suffix": " 拍"
+  },
+  {
+   "key": "xk_base",
+   "group": "xk",
+   "label": "采bpm（xk base）",
+   "type": "combo",
+   "default": 0,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "大直线 = 直接采 4 分音、**无视所有音符排列**硬铺等间隔骨架：绝对对拍、绝对不好看 ⇒ 必须配多押用。详见 `docs/47`",
+   "options": [
+    {
+     "label": "关（走原路径）",
+     "value": 0
+    },
+    {
+     "label": "2k（一拍 2 砖）",
+     "value": 2
+    },
+    {
+     "label": "4k（一拍 4 砖）",
+     "value": 4
+    },
+    {
+     "label": "8k（一拍 8 砖）",
+     "value": 8
+    }
+   ]
+  },
+  {
+   "key": "xk_tbpm",
+   "group": "xk",
+   "label": "tbpm（0 = 没填）",
+   "type": "float",
+   "default": 0.0,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "那个测速站给的**歌曲拍速**；会**四舍六入五成双**取整、不含小数。cbpm = tbpm × N，砖长 = 60000/cbpm。★ 它夹在 50~210，超 210 会给 half-time ⇒ 与去噪解出的砖长差 2 的幂时**会报出来**（不静默）",
+   "min": 0.0,
+   "max": 400.0,
+   "step": 0.01,
+   "suffix": " bpm"
+  },
+  {
+   "key": "xk_span_help",
+   "group": "xk",
+   "label": "区间外 →",
+   "type": "info",
+   "default": "",
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "没框到的段落**走原路径**（② 主轨采音 + 常规求解）。区间在这里加（起止可写**格子号**或**毫秒**）；每段可各自选 N 与多押轨"
+  },
+  {
+   "key": "fit_mode",
+   "group": "fit",
+   "label": "求解方式",
+   "type": "combo",
+   "default": "solve",
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "最优化 = 像人写的谱（有模板/雪花），代价是量化会挪时序；直拟合 = 每层时长恒等于 Δt（零漂移），代价是几何只有速度档可调",
+   "options": [
+    {
+     "label": "最优化（原路：模板/三连音/雪花，会改时序）",
+     "value": "solve"
+    },
+    {
+     "label": "直拟合（一砖一音，时序逐点精确）",
+     "value": "direct"
+    }
+   ]
+  },
+  {
+   "key": "denoise_on",
+   "group": "fit",
+   "label": "去噪（先吸到格上）",
+   "type": "check",
+   "default": true,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "外部来源（RL 生成/手扒）的时间戳有抖动 ⇒ 先吸到格上再拟合，travel 才是整齐的有理数。关掉 = 完全不动（老路径）"
+  },
+  {
+   "key": "denoise_hint_ms",
+   "group": "fit",
+   "label": "砖长（0 = 自动）",
+   "type": "float",
+   "default": 0.0,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "一拍多少毫秒（= 60000/baseBpm）。0 = 自动：取间隔的对数直方图众数",
+   "min": 0.0,
+   "max": 5000.0,
+   "step": 0.5,
+   "suffix": " ms"
+  },
+  {
+   "key": "denoise_div",
+   "group": "fit",
+   "label": "吸附分母",
+   "type": "combo",
+   "default": 0,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "与 BDG 顶栏的吸附档位同一套。★ 太粗吸不掉抖动、太细两个音会撞进同一格（宿主 `addMarker` 会**静默返回 null** = 丢音）",
+   "options": [
+    {
+     "label": "自动（最细但不撞格）",
+     "value": 0
+    },
+    {
+     "label": "1/1",
+     "value": 1
+    },
+    {
+     "label": "1/2",
+     "value": 2
+    },
+    {
+     "label": "1/4",
+     "value": 4
+    },
+    {
+     "label": "1/8",
+     "value": 8
+    },
+    {
+     "label": "1/16",
+     "value": 16
+    },
+    {
+     "label": "1/32",
+     "value": 32
+    }
+   ]
+  },
+  {
+   "key": "fit_tol_ms",
+   "group": "fit",
+   "label": "拟合容差",
+   "type": "float",
+   "default": 100.0,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "★ 把 ±容差 之内的抖动**修正到常规线**上（单位毫秒）。0 = 一个点都不挪（保真）；值越大修得越狠，**超出的原样保留并报出来**。去噪时它 = 吸附半径；开了下面的「激进拟合」后它 = 吸到 15° 阶梯上的挪动预算。",
+   "min": 0.0,
+   "max": 100.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "aggressive_fit",
+   "group": "fit",
+   "label": "使用激进的拟合策略",
+   "type": "check",
+   "default": false,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "★ 只对**直拟合**有效：把「常规线」换成 **15° 阶梯** —— 非双押格的角度全部落在 15 30 45 60 75 90…（15° 的整数倍）上，并把「最小角度」钉成 15°。挪动量仍受「拟合容差」限制；挪不动的原样保留并报出来。代价：时间会被动（每个音 ≤ 容差），且这些点不再落在 BDG 的 1/2^k 吸附格上（投到编辑器时别开吸附）。"
+  },
+  {
+   "key": "anchor_from_grid",
+   "group": "fit",
+   "label": "桥接锚用格相位",
+   "type": "check",
+   "default": true,
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "直拟合+去噪时把 φ（格相位）当 BDG 的 offsetMs ⇒ 宿主的 beatOfTime() 恰好是 k/div（整数格）。关掉就用 .adofai 的 offset（旧行为）"
+  },
+  {
+   "key": "tier_mode",
+   "group": "fit",
+   "label": "选档策略",
+   "type": "combo",
+   "default": "dp",
+   "target": "",
+   "scope": "solve",
+   "schedule": true,
+   "help": "两条路谱面形状差别很大 ⇒ 建议拿自己那份数据各生成一次看预览再定。DP 会让密集处**加速**把小格子铺直；粘住档位则宁可留小角度也不换档",
+   "options": [
+    {
+     "label": "DP（用④里的最小角度/直线优先/最少层数）",
+     "value": "dp"
+    },
+    {
+     "label": "粘住上一档（保真：尽量不动速度档）",
+     "value": "sticky"
+    }
+   ]
+  },
+  {
+   "key": "countdown_ticks",
+   "group": "export",
+   "label": "countdownTicks",
+   "type": "int",
+   "default": 4,
+   "target": "export.countdown_ticks",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": 1,
+   "max": 12
+  },
+  {
+   "key": "separate_countdown",
+   "group": "export",
+   "label": "倒计时与歌曲分开计时",
+   "type": "check",
+   "default": false,
+   "target": "export.separate_countdown",
+   "scope": "solve",
+   "schedule": true,
+   "help": ""
+  },
+  {
+   "key": "song",
+   "group": "export",
+   "label": "曲名",
+   "type": "text",
+   "default": "",
+   "target": "export.song",
+   "scope": "export",
+   "schedule": false,
+   "help": "同时决定导出子目录名"
+  },
+  {
+   "key": "artist",
+   "group": "export",
+   "label": "艺术家",
+   "type": "text",
+   "default": "",
+   "target": "export.artist",
+   "scope": "export",
+   "schedule": false,
+   "help": ""
+  },
+  {
+   "key": "author",
+   "group": "export",
+   "label": "作者",
+   "type": "text",
+   "default": "ADOFAI Chart Generator",
+   "target": "export.author",
+   "scope": "export",
+   "schedule": false,
+   "help": ""
+  },
+  {
+   "key": "auto_offset",
+   "group": "export",
+   "label": "自动 = 首个 onset（配合前置静音音频）",
+   "type": "check",
+   "default": true,
+   "target": "ui.auto_offset",
+   "scope": "solve",
+   "schedule": true,
+   "help": "★ **默认开**（开门一遍就能对上）：offset 自动写成「首个 onset + 前置静音 − 第一格」，也就是零误差配方。你**手动改过 offset** 之后，本项不再覆盖你的输入"
+  },
+  {
+   "key": "offset",
+   "group": "export",
+   "label": "offset",
+   "type": "float",
+   "default": 0.0,
+   "target": "export.offset_ms",
+   "scope": "solve",
+   "schedule": true,
+   "help": "",
+   "min": -600000.0,
+   "max": 600000.0,
+   "step": 1.0,
+   "suffix": " ms"
+  },
+  {
+   "key": "difficulty",
+   "group": "export",
+   "label": "难度",
+   "type": "int",
+   "default": 0,
+   "target": "export.difficulty",
+   "scope": "export",
+   "schedule": false,
+   "help": "",
+   "min": 0,
+   "max": 25
+  }
+ ],
+ "view_fields": [
+  {
+   "key": "lanes",
+   "group": "fallingview",
+   "label": "轨道数",
+   "type": "combo",
+   "default": 4,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "",
+   "options": [
+    {
+     "label": "4",
+     "value": 4
+    },
+    {
+     "label": "8",
+     "value": 8
+    }
+   ]
+  },
+  {
+   "key": "fspeed",
+   "group": "fallingview",
+   "label": "流速",
+   "type": "int",
+   "default": 100,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "",
+   "min": 10,
+   "max": 800
+  },
+  {
+   "key": "division",
+   "group": "fallingview",
+   "label": "切分",
+   "type": "combo",
+   "default": 8,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "",
+   "options": [
+    {
+     "label": "4",
+     "value": 4
+    },
+    {
+     "label": "8",
+     "value": 8
+    },
+    {
+     "label": "16",
+     "value": 16
+    },
+    {
+     "label": "32",
+     "value": 32
+    }
+   ]
+  },
+  {
+   "key": "lanemode",
+   "group": "fallingview",
+   "label": "轨道分配",
+   "type": "combo",
+   "default": 0,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "",
+   "options": [
+    {
+     "label": "按音高分位",
+     "value": 0
+    },
+    {
+     "label": "按音高线性",
+     "value": 1
+    },
+    {
+     "label": "左右交替",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "key": "pfollow",
+   "group": "pathview",
+   "label": "路径跟随",
+   "type": "check",
+   "default": true,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": ""
+  },
+  {
+   "key": "music_delay_ms",
+   "group": "chartview",
+   "label": "音乐延迟补偿",
+   "type": "int",
+   "default": 0,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "内嵌 ADOFAI 播放器的偏移修正：正值=音乐相对游戏时间线延后播放。播放中改立即生效，不触发重算谱面",
+   "min": -500,
+   "max": 500,
+   "step": 1,
+   "suffix": " ms"
+  },
+  {
+   "key": "preview_audio_mode",
+   "group": "chartview",
+   "label": "预览音源",
+   "type": "combo",
+   "default": 0,
+   "target": "",
+   "scope": "ui",
+   "schedule": true,
+   "help": "预览放什么声音。**默认「自动」= 今天的行为**（载入 .ogg / BDG 工程带原曲就放原曲，否则放我们合成的节拍音）。选「指定文件」可以从外面挑一首原曲做**音频混合预览**",
+   "options": [
+    {
+     "label": "自动（有原曲就用原曲）",
+     "value": 0
+    },
+    {
+     "label": "合成音（节拍音）",
+     "value": 1
+    },
+    {
+     "label": "指定文件（选一个 ogg/wav/mp3）",
+     "value": 2
+    }
+   ]
+  },
+  {
+   "key": "preview_audio_path",
+   "group": "chartview",
+   "label": "原曲文件",
+   "type": "path",
+   "default": "",
+   "target": "",
+   "scope": "ui",
+   "schedule": true,
+   "help": "「预览音源 = 指定文件」时用的那份音频（ogg / oga / wav / flac / mp3）。点右边「选…」挑文件；换文件会重算一次（轴常量跟着变）"
+  },
+  {
+   "key": "preview_audio_offset_ms",
+   "group": "chartview",
+   "label": "原曲偏移 Δ",
+   "type": "float",
+   "default": 0.0,
+   "target": "",
+   "scope": "ui",
+   "schedule": false,
+   "help": "★ **预览专用**：把原曲整体**推后** Δ 毫秒（负值 = 提前）去和谱面对齐 ——拖动立即生效、**不重算谱面、不写进 .adofai**。（成品要也对上，改 ⑤ 的 offset 或开「自动 offset」）",
+   "min": -5000.0,
+   "max": 5000.0,
+   "step": 5.0,
+   "suffix": " ms"
+  }
+ ],
+ "defaults": {
+  "file_info": "未加载",
+  "dp_tol": 45.0,
+  "dp_mode": 1,
+  "dp_reserve": true,
+  "dp_theta": 0.0,
+  "use_fixed_dp_angle": true,
+  "three_press_mode": 0,
+  "dp_skew_max_ms": 25.0,
+  "sub_gap_ms": 600.0,
+  "merge_ms": 30.0,
+  "merge_anchor": "first",
+  "min_velocity": 1,
+  "min_interval_ms": 0.0,
+  "max_onsets": 0,
+  "pitch_lo": 0,
+  "pitch_hi": 127,
+  "auto_bpm": true,
+  "quantize_rhythm": true,
+  "base_bpm": 180.0,
+  "ref_index": 0,
+  "bpm_max": 400.0,
+  "straight_preset": 1,
+  "allow_set_speed": true,
+  "twirl_index": 0,
+  "twirl_limit_deg": 240.0,
+  "use_templates": true,
+  "template_only_nonstraight": true,
+  "use_pause": true,
+  "pause_min_beats": 4.0,
+  "travel_min": 20.0,
+  "closed_bias_index": 1,
+  "straighten": true,
+  "straighten_min_run": 8,
+  "straighten_theta": 20.0,
+  "aggressive_pick": false,
+  "ladder_outer_mode": "auto",
+  "ladder_outer_cbpm": 400.0,
+  "ladder_tier_order": "straight",
+  "use_snowflake": false,
+  "snowflake_min_tiles": 10,
+  "snowflake_full_tiles": 48,
+  "snown_index": 0,
+  "snowflake_shape": "auto",
+  "snowflake_min_arms": 2,
+  "snowflake_compact": true,
+  "snowflake_uniform_tol_ms": 3.0,
+  "snowflake_random": false,
+  "snowflake_seed": 20240213,
+  "use_position_track": false,
+  "pos_track_step": 0.22,
+  "pos_track_min_beats": 8.0,
+  "xk_base": 0,
+  "xk_tbpm": 0.0,
+  "xk_span_help": "",
+  "fit_mode": "solve",
+  "denoise_on": true,
+  "denoise_hint_ms": 0.0,
+  "denoise_div": 0,
+  "fit_tol_ms": 100.0,
+  "aggressive_fit": false,
+  "anchor_from_grid": true,
+  "tier_mode": "dp",
+  "countdown_ticks": 4,
+  "separate_countdown": false,
+  "song": "",
+  "artist": "",
+  "author": "ADOFAI Chart Generator",
+  "auto_offset": true,
+  "offset": 0.0,
+  "difficulty": 0,
+  "lanes": 4,
+  "fspeed": 100,
+  "division": 8,
+  "lanemode": 0,
+  "pfollow": true,
+  "music_delay_ms": 0,
+  "preview_audio_mode": 0,
+  "preview_audio_path": "",
+  "preview_audio_offset_ms": 0.0,
+  "tracks_checked": [],
+  "sub_checked": [],
+  "dp_checked": [],
+  "current_track": 0,
+  "dp_tracks_avail": [],
+  "regions": [],
+  "segments": [],
+  "xk_ranges": [],
+  "segment_mode": "from"
+ },
+ "beat_beats": [
+  0.0,
+  0.25,
+  0.5,
+  0.75,
+  1.0,
+  1.5,
+  2.0,
+  4.0
+ ],
+ "twirl_values": [
+  "alternate",
+  "accum",
+  "steer",
+  "off"
+ ],
+ "straight_values": [
+  "少",
+  "平衡",
+  "多"
+ ],
+ "snown_values": [
+  [
+   6,
+   8,
+   10,
+   12
+  ],
+  [
+   6
+  ],
+  [
+   8
+  ],
+  [
+   12
+  ]
+ ],
+ "speed_tiers": [
+  0.125,
+  0.25,
+  0.5,
+  1.0,
+  2.0,
+  4.0,
+  8.0
+ ],
+ "straight_presets": {
+  "少": 3.0,
+  "平衡": 1.5,
+  "多": 0.7
+ },
+ "track_lists": {
+  "onset": [
+   "lst_tracks",
+   "主轨（可多选）：勾哪几条就采哪几条，取并集"
+  ],
+  "sub": [
+   "lst_sub",
+   "次级轨（只插空）：只在主轨的空白缝隙里补音"
+  ],
+  "dp": [
+   "lst_dp",
+   "勾选当作双押轨的轨（不参与主轨并集）"
+  ]
+ }
+}

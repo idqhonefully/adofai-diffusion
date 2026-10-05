@@ -1,0 +1,11 @@
+<Project>
+
+  <!-- 所有路径钉在 D 盘，且必须在 Microsoft.Common.props 之前生效 ——
+       放在 csproj 里会触发 MSB3539（NuGet 已经开始用了才改，来不及）。 -->
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)build\$(MSBuildProjectName)\obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)out\</BaseOutputPath>
+    <RestorePackagesPath>$(MSBuildThisFileDirectory)..\.nuget-packages</RestorePackagesPath>
+  </PropertyGroup>
+
+</Project>

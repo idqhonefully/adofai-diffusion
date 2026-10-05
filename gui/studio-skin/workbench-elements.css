@@ -1,0 +1,77 @@
+/* ==========================================================================
+   ADOFAI Studio · 「工作台布局」增量改造 —— 新元素的**结构性**样式
+   --------------------------------------------------------------------------
+   适用版本：ADOFAI 谱面生成器 0.5.0（renderer）
+   加载位置：`style.css` **之后**（放在 `skin-workbench.css` 之后最省心）
+
+   与 `skin-workbench.css` 的分工：
+     · skin-workbench.css    = 换**外观**（颜色 / 材质 / 圆角），零新增元素
+     · 本文件                = 新增元素的**骨架**，只在采用本次布局改造时才需要
+   所以：只要皮肤 → 只引 skin-workbench.css；皮肤 + 布局改造 → 两个都引。
+
+   颜色一律写成 `var(--你的token, 回退值)`：
+     · 套皮肤时：皮肤会重定义 `--panel2 / --ink / --accent2` 等**同名** token，
+       于是这些新元素自动跟着皮肤走，不需要皮肤里再写一遍；
+     · 不套皮肤时：用回退值，与你的原版深色主题一致。
+   `--bg-3` 和 `--blur` 只有皮肤里才有，所以必须带回退 —— 不带的话属性会整条失效。
+
+   本文件**不含任何一行对既有元素的布局改写**：报告带、工具条原有的排布规则
+   全部由你的 `style.css` 说了算，这里只管三个新东西 ——
+     `#rep-head / #rep-caret / #rep-brief`（报告带标题栏）、
+     `.vsum`（工具条药丸）、`#av-pop`（音源与偏移浮层）。
+   ========================================================================== */
+
+/* ── 大直线（采bpm）浮窗：③b 那一组已按本次改造搬进右栏检查器（排在 ③ 与 ④ 之间），
+      浮窗里就空了 ⇒ app.js 会给它打 fl-empty，这里整块隐藏。
+      `!important` 是必须的：宿主 `layout.js` 的 applyLayout() 每次都会把浮窗的
+      `display` 重新写成 `flex`，普通声明压不住（内联样式同理）。 ── */
+#fl-xk.fl-empty { display: none !important; }
+
+/* ── 报告带收起态（不论它停靠在哪个槽、还是被拖成浮窗都成立） ── */
+.pane.docked.collapsed > *:not(.zhead):not(.fhead) { display: none; }
+#report.collapsed > *:not(.zhead) { display: none; }
+#report.collapsed > .zhead { border-bottom: 0; }
+#report > .zhead { flex: 0 0 auto; cursor: pointer; user-select: none; }
+#report > .zhead:hover { background: var(--panel2, #171d24); }
+#report > .zhead .caret { color: var(--ink4); font-size: 10px; width: 9px; }
+#rep-brief { color: var(--ink3); overflow: hidden; white-space: nowrap;
+             text-overflow: ellipsis; max-width: 52%; }
+
+/* ── 工具条：只剩「一行说明 + 一颗药丸」（提示文字可收缩，不撑爆工具条） ──
+   `flex: 1 1 0` 而不是 `1 1 auto`：basis=0 意味着它**不参与折行判定**，
+   于是即便在最小窗口宽（1100）下工具条也始终是一行 —— 说明文字超出就用省略号，
+   完整文案本来就在它的 `title` 里（悬停可见）。这就是本次改造「工具条只占一行」的落点。 */
+.vbar > .hint { flex: 1 1 0; min-width: 0; }
+.vbar .vsum {
+  background: var(--bg-3, #1b232c); border: 1px solid var(--line2); border-radius: 999px;
+  padding: 2px 10px; color: var(--ink2); font-size: 11.5px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 0 0 auto; max-width: 46%;
+}
+.vbar .vsum:hover { border-color: var(--accent2); color: var(--ink, #d6dee6); }
+.vbar .vsum b { color: var(--ink, #d6dee6); font-weight: 600; }
+
+/* ── 「音源与偏移」浮层（position:fixed ⇒ 不受任何 pane 的 overflow 裁剪） ── */
+#av-pop {
+  position: fixed; z-index: 30; width: min(430px, 92vw);
+  background: var(--panel2, rgba(20, 24, 30, .98));
+  border: 1px solid var(--line2); border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, .55);
+  /* 套皮肤时 --blur=14px ⇒ 跟着皮肤一起磨砂；不套皮肤时 --blur 缺失 → 0px 无模糊 */
+  backdrop-filter: blur(var(--blur, 0px)); -webkit-backdrop-filter: blur(var(--blur, 0px));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#av-pop .avhead {
+  display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+  background: var(--bg-3, #1b232c); border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; color: var(--ink2);
+}
+#av-pop .avbody { padding: 8px 10px 10px; display: flex; flex-direction: column;
+                  gap: 6px; max-height: 62vh; overflow: auto; }
+#av-pop .avbody .field > label { flex: 0 0 116px; }
+#av-pop .avbody input[type="number"], #av-pop .avbody select { width: 100%; }
+#av-pop .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+/* ── 移动模式（Shift+M）：浮层不参与 —— 内容全冻结，别留一个能点的东西 ── */
+body.layoutmode #av-pop { display: none; }
+body.layoutmode .vbar .vsum { pointer-events: none; }

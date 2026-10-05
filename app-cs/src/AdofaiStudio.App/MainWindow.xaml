@@ -1,0 +1,42 @@
+<Window x:Class="AdofaiStudio.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="ADOFAI Studio"
+        Icon="app.ico"
+        Width="1560" Height="940"
+        MinWidth="560" MinHeight="420"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        Background="Transparent"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
+
+  <!-- 窗口边框模式**刻意不在这里写死** —— 由构造函数按 ADOFAI_SHELL_CHROME 决定：
+       native（默认）  = 什么都不设，走 WPF 默认 → Windows 自己画标题栏（图标 + ADOFAI Studio +
+                         — ▢ ✕），Snap Layouts 悬停、右键系统菜单、双击、Win+方向键全是系统实现，
+                         我们一行都不用写。页面上那条自绘标题栏由注入的 CSS 整条隐藏。
+       frameless       = WindowStyle=None + WindowChrome（见 ApplyFramelessChrome），即上一版形态：
+                         无边框、标题栏由页面自己画，靠 app-region + WM_NCHITTEST 模拟系统行为。
+       放在代码里是因为这两种模式的差异不止 WindowStyle 一处（还有注入给页面的 CSS），
+       分两处设迟早会漂移成"半个原生半个自绘"。
+
+       Background=Transparent 两种模式都要：DWM 的材质画在窗口之后，客户区一刷不透明色就把它盖住了。
+       （frameless 下 GlassFrameThickness=-1 与老壳的 DwmExtendFrameIntoClientArea(-1,-1,-1,-1) 等价，
+         否则 WebView2 的透明背景会糊成白底。） -->
+
+  <Grid Background="Transparent">
+    <wv2:WebView2 x:Name="View" />
+
+    <!-- 起不来时不让用户面对一片空白：错误直显 + 指路日志 -->
+    <Border x:Name="Fatal" Visibility="Collapsed" Background="#0E1116">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="640">
+        <TextBlock Text="ADOFAI Studio 启动失败"
+                   Foreground="#E6E8EE" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12" />
+        <TextBlock x:Name="FatalText"
+                   Foreground="#9AA4B2" FontSize="13" TextWrapping="Wrap" />
+        <TextBlock Text="按 Esc 关闭窗口" Foreground="#5F6A78" FontSize="12" Margin="0,16,0,0" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

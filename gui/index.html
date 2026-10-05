@@ -1,0 +1,2860 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ADOFAI Studio</title>
+  <script>
+    /* [SOLID-HEAD] 实色档首帧：在样式生效前把 data-material 设好，避免先按半透主题画一帧再跳实色。
+       与宿主 ThemeInjectJs 的 data-theme 同理，值来自 localStorage（切材质时由页面写入）。 */
+    (function () {
+      try {
+        var m = localStorage.getItem('dsh.material');
+        if (m) document.documentElement.setAttribute('data-material', m);
+      } catch (e) {}
+    })();
+  </script>
+
+<style>
+  :root{
+    /* 🔴🔴 2026-09-29 第八轮（主人："深色模式切换的时候会突然闪白一下下，就一瞬间白一点点"）：
+       **白闪的真身 = 原生滚动条**。
+       项目里此前**一处 `color-scheme` 都没有** ⇒ 深色界面下 Chromium 仍按**浅色方案**画滚动条，
+       于是那就是一条发白的竖杠。切页动画正好会把它逼出来两次：
+         · `fl-rise-in` 的 `translateY(25vh)` —— 按 CSS 规范，**变换后的边界盒算进滚动溢出区**，
+           那一瞬 `.page` 的滚动高度被临时撑大 ⇒ 滚动条出现；
+         · `.page.active.animating{overflow:hidden}` 在 ~620ms 后摘掉 ⇒ 滚动条又回来，再冒一次。
+       `scrollbar-gutter:stable` 只保证"宽度不跳"，**挡不住"颜色是浅色的"**。
+       ⇒ 按主题声明 color-scheme，让原生滚动条 / 表单控件跟着明暗走。
+       这也解释了为什么历轮探针量不到它：探针跑 headless，**headless 用 overlay 滚动条、
+       根本不渲染原生滚动条**，只有真机 WebView2 才画。⚠ 以后量滚动条必须带
+       `--disable-features=OverlayScrollbar` 起浏览器，否则是假绿。
+       ⚠ 浅色档写 `color-scheme:light` = 浏览器默认值 ⇒ 浅色档视觉**一字节不动**。 */
+    color-scheme:dark;
+    --bg-panel: rgba(28,28,33,0.55);
+    --bg-card: rgba(40,40,48,0.55);
+    --bg-input: rgba(20,20,24,0.65);
+    --border: rgba(255,255,255,0.10);
+    --border-2: #616166;
+    /* ★ 2026-10-05：把「卡片描边 / 控件描边 / 分隔线」拆成三个语义。
+       WinUI 深色描边（来自 Microsoft Learn 主题令牌，**权威值**）：
+         · CardStrokeDefault    = #1A000000（黑 10%）⇒ 卡片类容器（.card/.item/.mcard/.stem-group/#genProg/chip/.md pre）
+         · ControlStrokeDefault = #12FFFFFF（白 7%）⇒ 按钮、输入框、下拉
+         · DividerStrokeDefault = #15FFFFFF（白 8%）⇒ 分隔线、格线
+       原来卡片也吃 --border（白 10%）⇒ mica/acrylic/tabbed 上渲染成"一圈亮边"
+       （主人："人家 Windows 是没有这种看起来有一圈描边的"+"你当我瞎吗，云母/标签/acrylic 都有"）。
+       🔴 **关键修正**：卡片描边 = 黑 10%，且**对所有深色材质生效**（mica/acrylic/tabbed/solid 一视同仁），
+          不再只在 solid 开小灶。见下方 `html[data-theme="dark"]` 全局覆写；
+          浅色档仍走本行 `var(--border)`（黑 13%），逐字节不变。 */
+    --line-card: var(--border);
+    --text: #ECECEE;
+    --text-dim: #9A9AA2;
+    --accent: #4CC2FF;          /* ★ 2026-09-28：深色主色换成 Win11 标志性蓝 */
+    --accent-2: #2E9BD8;        /* 主色的深一档伴侣色 */
+    --on-accent: #1B1B1B;       /* 主色按钮上的文字色：#4CC2FF 是浅蓝 ⇒ 近黑字保对比度 */
+    --ok: #3FB950;
+    --err: #F85149;
+    --warn: #FBBF24;
+
+    /* ===== 叠层色（2026-09-22 抽出来，为了支持浅色主题）=====
+       这一整套是"往底色上叠一层"的取色。深色主题里底是 #0E1116 ⇒ 叠白；
+       浅色主题里底是浅的 ⇒ 需要**更亮**的地方（外框、卡片）继续叠白，
+       需要**更暗**的地方（hover、行内码、小标签）得反过来叠黑。
+       所以别把它们统一成"一个 --ov"，语义本来就是分开的。
+       ⚠ 深色这一组必须与抽出来之前的字面值逐字节相同 —— 深色是主人已经在用的样子，
+         改主题不该顺手改深色（改了就变成"我没让你改的地方也变了"）。 */
+    --fill-frame: rgba(255,255,255,0.04);   /* 外框底 */
+    --fill-card:  rgba(255,255,255,0.05);   /* 卡片底 / 表头 */
+    --fill-ctl:   rgba(255,255,255,0.06);   /* 按钮、输入框的底 */
+    --fill-chip:  rgba(255,255,255,0.08);   /* 小圆点、行内码这类"再亮一点"的块 */
+    --fill-hover: rgba(255,255,255,0.10);   /* hover / 选中态 */
+    --fill-strong:rgba(255,255,255,0.12);   /* hover 更强的一档、静止徽标 */
+    --line-strong:rgba(255,255,255,0.20);   /* 引用条这类明显的分隔线 */
+    --line-ring:  rgba(255,255,255,0.15);   /* 转圈环 */
+    --line-dot:   rgba(255,255,255,0.22);   /* 步骤小圆点 */
+    --titlebar-bg:rgba(20,20,24,0.35);
+    /* ★ 材质基色参考值（深色 Mica/亚克力基准 #0E1116；浅色见下方 light 覆盖 #F3F3F3）。
+       🔴 **只作参考，不许拿去给 body / #main 垫底** —— 第六、七两轮已经证过：任何不透明底
+          都会把宿主材质按区域整块盖死（主人："其他窗口材质除了顶部状态栏全部变成纯色"
+          / "动画一播放就全部白色不透明了"）。白闪的根因是滚动条配色，不是缺底色。 */
+    --app-bg:#0E1116;
+    --modal-bg:   #1b2230;
+    --modal-accent:#5fe3ff;
+    --modal-body: #aeb9c9;
+    --md-head:    #c8d0dc;
+    --badge-run-fg:#1B84C4;
+    --nav-active-fg:#fff;
+
+    /* ===== 圆角（2026-09-22 主人："这个框框的角度和窗口的角度不一样，看着很别扭"）=====
+       截图实测（tools/cornerprobe.py 量他自己的截图，图是 1.5×）：
+         窗口右缘 x=307、底缘 y=193，弧只跨 12 物理 px ⇒ **Windows 自己的窗口圆角 = 8 CSS px**。
+       我们这边却是三档并存：外框 12 / 卡片 16 / mcard·pcard 12~14 ⇒ 同屏三个角度，
+       而卡片离窗口只有 18px，眼睛一定会把这两个弧放在一起比 —— 这就是"别扭"。
+       ⇒ 立一个"跟窗口同源"的基准值，容器族（外框 / 卡片 / 各种小卡）全部对齐它。
+         将来窗口圆角若有变（不同 DPI 或系统改版），只改这一个数。
+
+       ⚠ 为什么不是"同心圆"（内层 = 外层 − 间距）：我们的页边 18px、卡内边距 20px，
+         R = 8 − 18 已经是负数 ⇒ 在这么大的间距下同心圆规则**在数学上做不到**。
+         既然做不到同心，那"角度一致"就是退而求其次里唯一说得通的目标。 */
+    --rd-win: 8px;    /* 容器族：外框 / 卡片 / 列表项 / 小卡 */
+    /* ★ 2026-09-28 主人："整个界面包括按钮不具备一模一样的 Windows11 风格及效果"。
+       控件族圆角从 6px 收到 **4px** —— WinUI 里控件就是 4px（容器的 8px 与它的 4px 是
+       官方那对固定搭配），6px 是我当初自己折中的数，既不方也不圆，两条弧放在一起
+       就"差一点"、说不上来的不齐。shell-ui.css 那层的 --fl-r-ctl 本来就是 4px，
+       这里对齐它，两套 token 归一。 */
+    --rd-ctl: 4px;    /* 控件族：按钮 / 输入框 / 下拉（与 shell-ui.css 的 --fl-r-ctl 同值） */
+  }
+
+  /* ===== 浅色主题 =====
+     由宿主把 <html data-theme="light"> 设上（见 MainWindow.ApplyAppearance / ThemeInjectJs）：
+       · 实色档的底 = #F3F3F3（宿主 View.DefaultBackgroundColor）
+       · 云母档的底 = 系统的浅色云母（也在 #F3F3F3 一带）
+     所以这里的叠层要按"底是浅灰"来挑：
+       外框/卡片继续叠白（比底亮，读作"浮在底上的卡"）—— 跟深色主题同一个视觉关系；
+       hover、行内码、小标签反过来叠黑（叠白会白到看不见）。 */
+  /* ★ 实色档（dark）显式配色（2026-10-05） [SOLID-OVERRIDE]
+     半透主题下那套「白 alpha 叠在底色上」的取色，在实色档会变成
+     "同一 token 叠在不同父层渲染出不同像素"——外框 #1b1b1b／卡片 #272727／
+     控件 #333333 与 Windows 实色档（#202020／#2f2f2f／#3e3e3e）对不上且彼此不统一。
+     ⇒ 实色档不再叠 alpha，直接把各层 token 覆写成 Windows 实色档字面值，
+        分层落在 #191919(底)→#202020(外框)→#2f2f2f(卡片)→#3e3e3e(控件)。
+     🔴 仅作用于 dark+solid：浅色实色档仍走 html[data-theme="light"] 那套。 */
+  html[data-theme="dark"][data-material="solid"]{
+    --bg-panel: #202020;
+    --bg-card:  #2f2f2f;
+    --bg-input: #3e3e3e;
+    --fill-frame: #202020;
+    --fill-card:  #2f2f2f;
+    --fill-ctl:   #3e3e3e;
+    --fill-chip:  #454545;
+    --fill-hover: #454545;
+    --fill-strong:#4a4a4a;
+    --titlebar-bg:#191919;
+    --app-bg:     #191919;
+    --line-card: rgba(0,0,0,0.10);   /* 实色档卡片描边 = 黑 10%（WinUI CardStrokeDefault），仅 solid；mica/acrylic/tabbed 仍走 :root 白 10%（之前感觉） */
+    /* 分隔线仍走 --border（亮发丝线，DividerStroke 白 8%）。 */
+  }
+  /* [SOLID-FIX-3] 实色档把整页底刷成 #191919，盖住 WebView2 默认 #121212
+     （frameless 宿主下 View.DefaultBackgroundColor 未生效，露出的就是 Chromium 深色底）。
+     🔴 仅对 dark+solid 生效：mica/acrylic 档保持透明，由 DWM 材质透出。 */
+  html[data-theme="dark"][data-material="solid"]{background:var(--app-bg);}
+  html[data-theme="dark"][data-material="solid"] body{background:var(--app-bg);}
+
+  /* ★ 2026-10-05 修正：上一条 [DARK-GLOBAL] 把四种材质卡片描边统一黑 10%，
+     但在半透材质（mica/acrylic/tabbed）上黑边太隐没、显刻意隐藏线条、不好看，已撤销 ——
+     非 solid 材质回到 :root 白 10%（之前的感觉）；仅 solid 在上方块保留黑 10%。 */
+
+  html[data-theme="light"]{
+    /* 浅色档 = 浏览器默认方案 ⇒ 等于"什么都不设"，视觉零变化（见 :root color-scheme 注释）。 */
+    color-scheme:light;
+    --bg-panel: rgba(255,255,255,0.60);
+    --bg-card: rgba(255,255,255,0.70);
+    --bg-input: rgba(255,255,255,0.90);
+    --border: rgba(0,0,0,0.13);
+    --border-2: #9A9AA2;
+    --text: #1B1B20;
+    --text-dim: #5C5C66;
+    --accent: #1F63D6;          /* 浅底上要压暗一档，否则蓝字发飘 */
+    --accent-2: #174FB0;
+    --on-accent: #fff;           /* 浅色下主色是深蓝 ⇒ 白字（深色档在 :root 另给 #1B1B1B） */
+    --fill-frame: rgba(255,255,255,0.45);
+    --fill-card:  rgba(255,255,255,0.60);
+    /* ★ 2026-09-22 修主人报的"看不到控件的背景和框框了"：
+       原来这里写的是 rgba(255,255,255,0.75)（叠白）—— 但卡片本身已经是近白，
+       白叠白只会收敛到白，控件于是"没了"。改成叠黑 0.035（≈#F4F4F4）：
+       在 #FCFCFC 的卡片上拉开 ~8 阶，背景看得见；框框由上面的 --border（黑 0.13）负责。
+       ⚠ 会走到这个变量的只有 .appseg .dl（深浅胶囊）—— 按钮/输入框走的是
+         shell-ui.css 里那组 --ct-* token（那个文件后加载，优先级也够）。 */
+    --fill-ctl:   rgba(0,0,0,0.035);
+    --fill-chip:  rgba(0,0,0,0.05);
+    --fill-hover: rgba(0,0,0,0.06);
+    --fill-strong:rgba(0,0,0,0.10);
+    --line-strong:rgba(0,0,0,0.18);
+    --line-ring:  rgba(0,0,0,0.12);
+    --line-dot:   rgba(0,0,0,0.18);
+    --titlebar-bg:rgba(245,245,247,0.35);
+    --modal-bg:   #FFFFFF;
+    --modal-accent:#0B6E8A;
+    --modal-body: #3A3A42;
+    --md-head:    #333A45;
+    /* 材质切换的过场幕布（shell-ui.css 里那个 #shell-mat-veil）：
+       深色主题是"暗下去再亮起来"，浅色主题得反过来 —— 压一层浅色才藏得住跳变。 */
+    --shell-veil-color:#F3F3F3;
+    --app-bg:#F3F3F3;          /* 浅色材质基色参考值（同上：只作参考，不许拿去垫底） */
+    --badge-run-fg:#1F63D6;
+    --nav-active-fg:#0F1115;
+
+    /* ★ 2026-09-22 补：状态色也要压暗一档。
+       原值（#3FB950 / #F85149 / #FBBF24）是照深底挑的亮色，
+       放到 #F3F3F3 上字会"发飘"（黄色那档几乎读不出来）。
+       取的是工作台浅色主题里已经在用的同一组值 —— 两个页面别各挑一套。 */
+    --ok:   #1A7F37;
+    --err:  #C0271F;
+    --warn: #A15C00;
+  }
+  /* ★ 2026-09-22 浅色下另外两处"深底专属"的外观（主人这次说的是控件，
+     但这两处是同一类毛病：只对深底成立，换浅底就变成"深块配深字"/"倒过来的播放器"）：
+       · .md pre  行内代码块：底色是 rgba(0,0,0,.34)、字却跟 --text 走
+                  ⇒ 浅色下是"灰块 + 近黑字"，勉强能读但很难看；改成浅灰块。
+       · audio    播放器：深色主题下靠 filter:invert 把系统的浅色播放器翻成深色，
+                  浅色主题必须**取消这个反转**，否则浅底上摆一个黑播放器。 */
+  html[data-theme="light"] .md pre{background:rgba(0,0,0,.045);}
+  html[data-theme="light"] audio{filter:none;}
+  /* ★ 2026-09-28：主色换 Win11 蓝（#4CC2FF）**只针对深色档**。
+     下面这些叠底色原本写成了**全局**规则 —— 改主色时会顺带把浅色档也染一遍
+     （实测浅色档 3.04% 像素被改动）。按"浅色档一个字节都不动"把旧值原样还回去：
+     叠底恢复旧的 #4C8DFF 系列。这些 light 规则只会在浅色档命中。
+     ★ 2026-09-29：这里原本还有 14 行 `--nav-accent` 的 light 覆盖块（当时用来把侧栏
+       七彩还给浅色档）。现在侧栏七彩已在**基础规则**里恢复、两档通用（见下方
+       `.nav[data-page=…]` 那条），覆盖块与基础值完全重复 ⇒ 删掉，免留两处真相。 */
+  html[data-theme="light"] .tb-btn:hover{background:rgba(76,141,255,0.16);}
+  html[data-theme="light"] .badge.run{background:rgba(76,141,255,0.20);}
+  html[data-theme="light"] .note.blue{background:rgba(76,141,255,0.08);border-color:rgba(76,141,255,0.22);}
+  html[data-theme="light"] .mcard.sel{background:rgba(76,141,255,0.10);}
+  html[data-theme="light"] .appseg .dl.on{background:rgba(76,141,255,0.16);}
+  *{box-sizing:border-box;}
+  html,body{height:100%;margin:0;}
+  body{
+    background:transparent;            /* 透明：露出宿主材质（acrylic/mica/tabbed） */
+    color:var(--text);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    font-size:14px;overflow:hidden;user-select:none;
+  }
+  #titlebar{
+    height:42px;display:flex;align-items:center;padding:0 14px;gap:10px;
+    border-bottom:1px solid var(--border);
+    background:var(--titlebar-bg);
+    backdrop-filter:blur(20px) saturate(1.3);-webkit-backdrop-filter:blur(20px) saturate(1.3);
+  }
+  #titlebar .title{font-weight:600;font-size:13.5px;letter-spacing:.3px;}
+  #titlebar .spacer{flex:1;}
+  .tb-btn{padding:5px 12px;border-radius:var(--rd-ctl);border:1px solid var(--line-card);background:var(--fill-ctl);
+    color:var(--text);cursor:pointer;font-size:12.5px;font-family:inherit;transition:background .15s,border-color .15s;}
+  .tb-btn:hover{background:rgba(76,194,255,0.16);border-color:var(--accent);}
+  .win-btns{display:flex;align-items:center;gap:2px;}
+  .win-btns button{width:34px;height:26px;border:none;border-radius:6px;cursor:pointer;background:transparent;color:var(--text-dim);font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center;transition:background .15s,color .15s;}
+  .win-btns button:hover{background:var(--fill-hover);color:var(--text);}
+  .win-btns #closeBtn:hover{background:var(--err);color:#fff;}
+
+  /* 边缘缩放改由 JS 自报（见脚本里的 initResizeGrips）：WebView2 铺满客户区后，
+     原来那 7 个 .rz 覆盖层既没有事件绑定（死元素），又会在最外几像素上挡住
+     底下的滚动条/按钮，已删除。 */
+
+  #body{flex:1;display:flex;height:calc(100% - 42px);}
+
+  /* ===== 左侧侧边栏 =====
+     ★ 这里**故意不刷底色**（原来是 rgba(255,255,255,0.05) + blur(40px)）。
+       原因：DWM 材质画在窗口**之后**，标题栏用的就是材质基色；侧栏再叠一层 5% 白，
+       就会被整体提亮 —— 实测三档材质下侧栏恒定比原生标题栏亮 9~12 阶
+       （云母：#202020 → #2B2B2B；亚克力 (84,84,84) → (93,93,93)；无材质 (43) → (54)），
+       于是窗口左上角出现一条"标题栏深、侧栏浅"的硬台阶 —— 就是肉眼看到的不自然。
+       侧栏与内容区的分界改由 border-right 那条 1px 线承担（Win11 NavigationView 同款做法）。
+
+       ★ 2026-09-21 换形态：224px 横排 → **88px 窄图标栏**（拯救者工具箱同款排法）。
+         项里改成「图标在上、文字在下」—— 横向「图标+文字」在 88px 里放不下，
+         竖排才容得下 3 个中文字。标签同时缩短（生成谱面→生成 / 分离试听→分离 …），
+         `data-page` 一律不动（那是探针与路由的锚点，文字才是可以改的）。 */
+  /* ★ 2026-09-22 改造：任务管理器式侧栏 —— 默认折叠（只图标，52px），
+     点顶部汉堡展开成「图标+文字」（208px）。宽度带过渡，展开时把内容区挤窄。 */
+  #sidebar{
+    width:52px;flex:0 0 auto;padding:8px 6px;  /* ★ 2026-09-22 第十六轮：左右内边距**恢复对称 6px**。
+      ⚠ 这里曾经被改成 `8px 0 8px 6px`（第十五轮），目的是让"面板到按钮框"从 14px 收到 8px —— 做法错了：
+      .nav 是 width:100% 占满内容区，右留白一撤，按钮框就被从 40px 撑到 46px，悬停/选中的圆角框
+      整块往右长了一截（主人："**我是让你把界面往边靠，不是让你把按钮往右延长一点**"）。
+      图标 X 其实没动，但盒子右半空了、左右不等宽，读起来就是"按钮被拉长"。
+      ⇒ 正确做法是从**面板侧**下手：按钮与侧栏内边距一律不动，改 #main 的左页边（见那里的注释）。
+      🔴 记牢：要"两个距离相等"时，先问"**哪一侧是不该动的本体**"——按钮是本体，间距是附属；
+         动本体去凑间距，就会变成"改着改着把东西改变形了"。 */
+    background:transparent;
+    /* 指示条 #nav-ind 相对本栏绝对定位 ⇒ 这里必须是定位上下文 */
+    position:relative;
+    display:flex;flex-direction:column;gap:3px;overflow:hidden;
+    transition:width var(--fl-dur-fast) var(--fl-ease-std);
+  }
+  #sidebar.expanded{width:208px;}
+  /* ★ 2026-09-22：侧栏顶部汉堡开关（任务管理器式）。长得像一项导航，但它是按钮，
+     不进 nav 指示条逻辑（没有 .nav 类，syncNavInd 只认 .nav.active）。 */
+  #navToggle{
+    display:flex;align-items:center;justify-content:flex-start;
+    width:100%;height:38px;margin-bottom:4px;
+    /* ★ padding-left 必须与 .nav 的相等（9px）⇒ 汉堡图标与导航图标落在**同一条竖轴**上，
+       而且展开/收回时 X 恒定 —— 原来是 justify-content:center，图标跟着 52→208 的
+       宽度一起跑，实测横向行程 78px，主人："怎么菜单按钮飞了？" */
+    padding:0 9px;
+    border:none;background:transparent;border-radius:var(--rd-ctl);
+    color:var(--text-dim);cursor:pointer;
+    transition:background var(--fl-dur-fast) var(--fl-ease-std),color var(--fl-dur-fast) var(--fl-ease-std);
+  }
+  #navToggle:hover{background:var(--fill-hover);color:var(--text);}
+  /* ★ 按下回弹作用在**图标**上（不是整个按钮盒子）。Win11 顿挫感（2026-09-22 主人：再深再慢）：
+       按下→图标快速缩到 .80（深按一下，.1s 直线加速，咔哒）；松手→回弹到 1 带**更深过冲**（.4s 弹簧，曲线 y2=1.8）。
+       汉堡按钮(#navToggle)的图标同样适用，故合并选择器。 */
+  .nav:active .ico, #navToggle:active .ico{
+    transform:scale(.80);
+    transition:transform .1s cubic-bezier(.4,0,.2,1);  /* 按下：快、无过冲（深按） */
+  }
+  /* 🔴 margin-right 必须显式归零：shell-ui.css 里那条 `[data-ico] > .ico{margin-right:.38em}`
+     对本按钮同样生效（.38em × 13.33px = 5.07px）。在 flex 行里这半个外边距会把图标整体推偏，
+     实测汉堡中心 23.5 vs 导航图标 26 ⇒ 肉眼就是"这个菜单歪了"。
+     （`.nav .ico` 那条早就用 id 提权压掉了，这里当时漏了。） */
+  #navToggle .ico{width:22px;height:22px;margin-right:0;opacity:.9;
+    transition:transform .6s cubic-bezier(.34,1.25,.64,1);}  /* ★ 松手回弹：与导航图标同一条（.6s / 1.25） */
+  /* 导航分组：上方一组 + 下方（设置/关于）一组。
+     🔴 margin-top:auto **只许出现在这一个元素上**。
+        之前 `.foot`（就绪那行）也写了 margin-top:auto ⇒ 两个 auto 平分剩余空白，
+        底组被顶到半空、.foot 独占最底 —— 主人："你确定你放在最下面了？"。
+        .foot 现已整块删除（那行"就绪"是死文案，全项目没有任何地方写过它），
+        于是底组独占 auto，稳贴侧栏底。
+     ★ 同一轮也删掉了 .nav-sep 那条横线 —— 主人问"为什么要画一条横线，何意味呢？"。
+        它本来只是拿来分隔上下两组，而 Win11 任务管理器就是靠"把距离拉开"来分组的，不画线。 */
+  .nav-group{display:flex;flex-direction:column;gap:3px;width:100%;}
+  .nav-group.bottom{margin-top:auto;}
+  /* 侧栏项：图标在上、文字在下，整体居中（拯救者工具箱的排法）。
+     选中 = 底色 + 图标染成该页的强调色 + 左侧那条小竖条亮起。
+     ★ 左侧竖条（::before）当天被我撤过一次，**撤错了对象** —— 主人指的"凭空多出来的一根线"
+       是 #sidebar 的 border-right 和 .page 的描边，跟这条竖条毫无关系。现在按窄栏重新实现：
+       改成 position:absolute（不参与 flex 布局）。当初它是个 flex 子项，在横排的 224px 老版本里
+       正好当"行首竖条"，换成竖排后就变成"图标上面多一条"，把图标挤得不居中 —— 那才是我当时
+       判它有害的真实原因，用 absolute 就两头都成立了：位置固定在项的左边，布局里不占位。 */
+  /* 导航项：**折叠态与展开态共用同一套排布**（横排 + 左对齐 + 相同的 padding-left）。
+     图标恒在左起 9px 处（6 侧栏内边距 + 9 项内边距 + 22/2 = 26），文字在它右边。 */
+  .nav{
+    display:flex;align-items:center;justify-content:flex-start;gap:11px;
+    position:relative;padding:9px 9px;border-radius:var(--rd-ctl);cursor:pointer;color:var(--text-dim);
+    transition:background var(--fl-dur-fast) var(--fl-ease-std),color var(--fl-dur-fast) var(--fl-ease-std);
+    font-size:10.5px;line-height:1.2;text-align:left;width:100%;
+  }
+  /* 🔴🔴 折叠/展开**不许再改 flexDirection / justifyContent / padding-left**。
+     2026-09-22 主人第二轮原话："怎么收回的瞬间其他按钮也飞了？？？"
+     根因就在这儿：原来折叠态写的是 `flex-direction:column; justify-content:center`，
+     点收回的那一瞬项立刻变居中，而此时侧栏宽度**还在从 208 往 52 过渡**，
+     于是图标先瞬移到"被撑宽的那一整行"的中点（实测 cx 27 → 104），
+     再随宽度缩回 26 —— 全程 78px 位移，一排按钮集体横飞。
+     现在两态 X 恒定，过渡期间**零位移**，只有标签淡入淡出。
+     ⚠ 数值是凑巧两头都成立的：折叠 52px 宽、左右内边距 6px ⇒ 内容 40px，
+       (9 + 22 + 9) = 40 正好铺满 ⇒ 图标天然居中；展开态它又和标签同轴。
+     标签：用 opacity 而不是 display —— display 参与布局，会让图标 X 随宽度跳；
+       opacity 不参与布局，折叠时标签只是被侧栏的 overflow:hidden 裁掉。 */
+  .nav .lbl{opacity:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    transition:opacity var(--fl-dur-fast) var(--fl-ease-std);}
+  #sidebar.expanded .nav .lbl{opacity:1;}
+  /* 小竖条 = **选中指示器**（只有选中项那一条），而且是一个**会自己动**的元素。
+     ⚠ 它不是 .nav::before —— 伪元素挂在各自项上，切页时只能"旧的消失、新的出现"
+     （各自淡入淡出），**做不出连续的动作**。主人 21:37 说
+     "小竖条的切换到动画怎么没了"，指的就是这个：上一版用 opacity 淡入淡出、
+     时长只有 150ms，看着就是"啪"地跳一下。
+     ⇒ 改成 #sidebar 下的独立元素，由 shell-ui.js 的 syncNavInd() 驱动。
+     它不参与布局（绝对定位），所以也不会再把"图标在上、文字在下"顶歪。
+
+     ★ 2026-09-21 22:03 主人复核："这个条跑出来了，不应该在那个框框里吗"。
+       改独立元素那一版，把它的 X 写成了**侧栏的 0**（#sidebar 的左缘），
+       于是整条从"项的框的左缘"外移了 8px，掉进侧栏的横向内边距里 ——
+       视觉就是一条蓝条孤零零贴着窗口最左边，跟它要指示的那个圆角框脱开了。
+       ⇒ X 必须钉在**项的框的左缘**（= 侧栏左右内边距 8px）：CSS 这行给兜底值，
+         实际由 syncNavInd() 按选中项的 offsetLeft 写内联 left（内边距改了也不会错位）。
+       ⚠ left 不进过渡列表：它在切页时根本不变（项框不位移），
+         真加进过渡只会让"从 A 项滑到 B 项"那一下多出半截横向抖动。
+
+     ★★ 2026-09-22 主人第二轮裁定（这条最重要）：**不是"划过去"**。
+       原话："左侧那个条条切换的时候不是划过去，你知道 Windows11 里面是
+       缩小一截再直接弹开到另一个选中界面的前面吗"。
+       ⇒ 动作从"一个元素平移"改成**两段**：
+           ① 在**旧位置** scaleY 压到 0.28（110ms，accelerate 曲线 —— 离场用加速）
+           ② **跳到新位置**，再弹回 1（240ms，decelerate 曲线 —— 进场用减速）
+         全程**没有水平/垂直位移**，只有"缩一下 → 在新地方弹开"。
+       ⇒ 下面那条 CSS transition 只是**兜底**（首帧、字体就绪这类"非换页"的重定位用它）；
+         换页那两段由 syncNavInd() 逐段写内联 transition 接管。
+       ⚠ 判"是弹还是滑"必须采样 **rect 高度**：滑动时高度恒为 22px，
+         弹开时中间会掉到 6px 上下；只看 top 两种都会变，分不出来。 */
+  #nav-ind{
+    position:absolute;left:8px;top:0;               /* X 对齐项的左缘；Y 交给 transform，别用 top（top 不参与合成） */
+    width:3px;height:22px;border-radius:2px;
+    background:var(--nav-accent,var(--accent));
+    opacity:0;
+    pointer-events:none;                            /* 别挡住底下的 .nav 点击 */
+    transform-origin:50% 50%;                       /* ★ 压扁时上下对称地缩；默认就是 50% 50%，写出来是为了别被后人改成 top */
+    will-change:transform;
+    transition:transform var(--fl-dur, .22s) var(--fl-ease-std),
+               background var(--fl-dur-slow) var(--fl-ease-dec),
+               opacity var(--fl-dur-fast) var(--fl-ease-std);
+  }
+  /* 🔴 显隐由 JS 设**内联 opacity**（内联权重高于上面这条），**不要用 class 切换** ——
+     shell-ui.js 的 bootNavInd() 用 MutationObserver 盯侧栏的 class 变化，
+     再用 class 去控制显隐就会构成"改类→触发观察→再改类"的自激，
+     页面主线程直接占死（本轮踩过：探针跑 3 分钟不出结果，栈停在 navAccent）。 */
+  /* ★ 这里的 margin-right 必须显式归零：shell-ui.css 里有一条
+     `[data-ico] > .ico { margin-right:.38em }`（给横排文字流用的），它**后加载、同优先级**，
+     竖排时那 5px 会把图标推得偏左、整列看着不齐。用 id 提权压掉。 */
+  #sidebar .nav .ico{margin-right:0;}
+  /* 「设置」是字体字形（那才是系统那只齿轮），字号得单独给 —— 盒子 22px 是上面那条给的，
+     字形墨迹只随字号变。取 20px ⇒ 墨迹约 17.5px，与旁边 svg 图标（20 视窗缩到 22px
+     盒子里、墨迹 17.6px）等高，一列看过去不会有"某个特别大"。 */
+  #sidebar .nav .ico-glyph{font-size:20px;}
+  .nav .ico{width:22px;height:22px;opacity:.82;transform-origin:50% 50%;
+    /* ★ 图标回弹：松手时 transform 回弹带轻微过冲（Win11 那股顿挫感）。
+       按下（:active）时由下方统一规则临时换成更快的曲线，做出"咔哒"一下缩下去、弹回来。
+       ★★ 2026-09-28 主人："侧边栏按钮回弹动画速度太快，完全不具备 Windows11 的动画效果。"
+       上一版是 .4s / 过冲 1.8 —— 过冲 1.8 意味着图标会**超过原尺寸 80%** 再荡回来，
+       走完只用 .4s ⇒ 读起来是"啪"地抖一下，正是主人说的"太快"。
+       Win11 的按下反馈是**慢而收敛**的：回弹放到 .6s、过冲收到 1.25（峰值仅超出 25%），
+       于是变成"缓缓扶正"的一口气，而不是弹一下。
+       ⚠ 按下那一段（:active，.1s 直线加速）**保持不变** —— 深按的"咔哒"要靠它，
+         慢下来反而会失去按感。 */
+    transition:color .28s var(--fl-ease-std),opacity .28s var(--fl-ease-std),
+               transform .6s cubic-bezier(.34,1.25,.64,1);}  /* ★ 松手回弹：更慢(.6s)+过冲收敛(1.25) —— 2026-09-28 主人"太快" */
+  .nav:hover{background:var(--fill-hover);color:var(--text);}
+  .nav:hover .ico{opacity:1;}
+  .nav.active{color:var(--nav-active-fg);font-weight:600;}
+  .nav.active .ico{opacity:1;color:var(--nav-accent,var(--accent));}
+  /* 各标签独立配色（指示条与图标高亮跟随） */
+  /* ★★ 2026-09-29：主人指着侧栏问"这里的彩色怎么没了" ⇒ **七彩恢复**（两档通用）。
+     起因：9-28 那句"所有按钮在深色模式下换成 Win11 标志性蓝 #4CC2FF"被我套到了侧栏上，
+     把 7 项统一成同一个主色 —— 但**侧栏项是"导航项"，不是"按钮"**。统一之后
+     "颜色 = 页面身份"这套编码就没了：生成 蓝 / 工作台 绿 / 分离 青 / 历史 粉 /
+     设置 琥珀 / 关于 紫 / 训练 红，选中哪一页都是同一个蓝 ⇒ 主人说"彩色没了"。
+     🔴 **以后别再统一它们**（真要改主色，只动 shell-ui.css 的按钮主色）。
+     ⚠ 这套色**只有选中项**会亮（`.nav.active .ico` + `#nav-ind` 指示条）；
+       未选中项的图标本来就是 --text-dim 灰的 —— 别误以为"少了一半彩色"。 */
+  .nav[data-page="generate"]{--nav-accent:#4C8DFF;} .nav[data-page="generate"].active{background:rgba(76,141,255,0.18);}
+  .nav[data-page="workbench"]{--nav-accent:#3FB950;} .nav[data-page="workbench"].active{background:rgba(63,185,80,0.16);}
+  .nav[data-page="separate"]{--nav-accent:#22D3EE;} .nav[data-page="separate"].active{background:rgba(34,211,238,0.16);}
+  .nav[data-page="history"]{--nav-accent:#F472B6;} .nav[data-page="history"].active{background:rgba(244,114,182,0.16);}
+  .nav[data-page="settings"]{--nav-accent:#FBBF24;} .nav[data-page="settings"].active{background:rgba(251,191,36,0.16);}
+  .nav[data-page="about"]{--nav-accent:#A78BFA;} .nav[data-page="about"].active{background:rgba(167,139,250,0.16);}
+  .nav[data-page="train"]{--nav-accent:#F87171;} .nav[data-page="train"].active{background:rgba(248,113,113,0.16);}
+  /* ★ 2026-09-22 删除 `#sidebar .foot{...}`（侧栏底部那行"就绪"）。
+     两个理由：① 它带着 margin-top:auto，和 .nav-group.bottom 抢底部（见上方注释）；
+     ② "就绪"是写死的死文案 —— 全项目搜 sideFoot 只有"读"没有"写"，永远停在"就绪"，
+        而主人问"你写个就绪是啥意思？"正是这个。删掉后设置/关于才是侧栏最后一项。 */
+
+  /* ===== 右侧内容区（两层：页边 → 外框 → 卡片）=====
+     ★ 照拯救者工具箱的做法，这里**故意做成"框里套框"**：
+          #main 的 padding = 页边（四周露出材质底 ⇒ 外框看起来是"浮着"的一张卡）
+          .page.active   = 外框（一层 4% 白 + 12px 圆角；**不画描边**，见下）
+          .card          = 内框（再叠一层 5% 白）
+       实测那张参考图就是"每往内一层多 11 个色阶"（#414141 → #4C4C4C → #575757），
+       换算过来正好是每层叠一次 5% 白 —— 所以这里照同一个规律叠，不另编数值。
+
+     ⚠ 页边**不能省**：外框一旦贴到窗口四边，就退化成上一轮那种
+       "标题栏深、内容区浅"的错位感（当时侧栏就是被这 5% 白顶上去了）。
+       留了边 + 圆角，它才读作"一张卡浮在材质上"，而不是"两块颜色没对齐"。
+       ★ 2026-09-21：原先还加了 1px 描边和 1px 的侧栏分隔线，两条都撤了 ——
+         它们凑在一起读作"凭空多出来的一根竖线"（主人截图指的就是那儿）。 */
+  /* ★ 2026-09-21 晚：**滚动搬进外框里面**（照拯救者工具箱的"外框=固定显示区"）。
+       原来 #main{overflow:auto} ⇒ 滚的是"整块外框 + 内容"，于是框的圆角、顶边高光和
+       上边缘会跟着一起滚出画面 —— 滚到一半时内容直接贴到窗口顶边，"框"的感觉就没了。
+       参考图里外框是**定住不动的显示区**，只有里面的内容在滚，滚动条也长在框的内侧右缘。
+       做法：#main 只负责页边、自己不滚；.page.active 自己当滚动容器（flex 撑满 + overflow-y:auto）。
+       ⇒ 框的盒模型不动，滚动只发生在它的内容盒里，圆角与顶边高光天然固定。 */
+  /* ★ 2026-09-22 主人裁定（第一轮）：页边从 16px/18px 收到 6px 级 —— "面板离窗口边"要和
+     "侧栏按钮离窗口边"读作同一档（原来右边 18px、侧栏按钮只离 6px，一边 18 一边 6 不齐）。
+     ★ 2026-09-22 主人裁定（第二轮）：**右边还要再宽一点**。第一轮我把四边写成 8px 6px，
+     于是"右 6 / 下 8"差着 2px —— 右下角两个方向不等距，看着就是"不太一样"。
+     现在四边统一 **8px**：右 = 下 = 上 = 8，右下角对称；面板与侧栏之间也顺势给到 8px。
+     ⚠ 页边仍是页边、**不许归零**：面板与窗口边界之间那圈材质底得留着，
+       贴边会退回上一轮那种"两块颜色没对齐"的错位感。
+     ★ 2026-09-22（第十六轮）主人："我是让你把界面往边靠，不是让你把按钮往右延长一点"。
+       要达到"面板 ↔ 左侧按钮框 = 面板 ↔ 右边框 = 8px"，有两条路：
+         ① 动按钮（把侧栏右内边距归零）→ 按钮框被撑宽 6px ❌ 上一轮就是这么错的
+         ② 动面板（把 #main 左页边收掉）→ 按钮原样不动 ✅ **本轮取这条**
+       算法：侧栏 52px 宽、左右内边距各 6px ⇒ .nav 框右缘在 x=46。
+             面板左缘要落在 46+8=54 ⇒ #main 左页边 = 54 − 52 = **2px**（其余三边照旧 8px）。
+       ⇒ 所以四边不再同值，左 2 右 8 下 8 上 8 —— 但**肉眼可见的三个距离仍是同一个 8px**
+         （面板到按钮框 / 面板到右边框 / 面板到底边框），这才是主人要的"一样"。
+         左页边 2px 那点材质底是"侧栏与面板之间的分界"，不是间距。 */
+  /* ★ 2026-09-29 第五轮：四边页边抽成 CSS 变量 —— 因为 .page.leaving 的 absolute inset
+     是相对**包含块的 padding box**，而静态的 .page.active 在**内容盒**里。要让旧页在
+     "换类成 .leaving" 的一瞬间几何纹丝不动，inset 必须显式退回这四边；两处写死迟早漂。 */
+  #main{
+    --edge-t:8px; --edge-r:8px; --edge-b:8px; --edge-l:2px;
+    flex:1;min-width:0;
+    padding:var(--edge-t) var(--edge-r) var(--edge-b) var(--edge-l);
+    overflow:hidden;display:flex;flex-direction:column;position:relative;
+  }
+  /* 🔴🔴 2026-09-29 第八轮铁律：**绝不给 #main / body 垫任何不透明底**。
+     第六轮给 body 垫实色（`--app-bg`）时主人报"材质除了顶部状态栏全变纯色"；
+     第七轮改成"只在过渡的 470ms 给 #main 垫一层"（`.pg-transitioning`），主人截图回
+     "浅色模式动画一播放就全部白色不透明了 / 深色模式是黑色不透明了"。
+     根因很清楚：整个客户区是**透明的 WebView2 + 宿主 DWM 材质（亚克力）**，
+     任何一层不透明底都会把材质按区域整块盖死 —— 过渡期间的"平色块"比原来那一下白闪
+     还难看。**材质优先，绝不为了遮闪去盖底。**
+     白闪的真身见下面 `color-scheme` 那条：是**原生滚动条的浅色方案**，不是背景。
+     （探针 `tools/bgcheck.js` 里有断言守着"过渡中不得出现任何 cover 类"。） */
+  .page{display:none;}
+  /* ★ 2026-09-29 第五轮（主人报"旧页往左上角飞了一段距离"）：**外框盒模型由 active / leaving 共用**。
+     原来 padding / overflow / scrollbar-gutter / 底色 / 圆角 / 尺寸**只写在 .page.active 里**
+     ⇒ 旧页一挂 .leaving 这些声明全部失效：padding 18/20/22 **掉成 0**（内容整体左 20、上 18）、
+     scrollbar-gutter 丢（内宽多 12px）；再叠加 .leaving 的 absolute inset 基准偏移（左 2 / 上 8、
+     右下各扩 8）⇒ pagejump 实测旧页内容**一帧内左移 22px、上移 26px**，外框还撑大 10×16px。
+     提到组选择器之后，切页只换"谁可见 / 谁在渐隐"，几何一个像素都不动。
+     ⚠ 别再把这些声明挪回 .page.active 单个选择器里 —— 加回来就复发本 bug。 */
+  .page.active,
+  .page.leaving{
+    display:block;
+    /* 撑满 #main 的内容盒。原来是 min-height:calc(100vh - 74px) 手算视口高，现在交给 flex：
+       短页面照样占满一屏（下面不露半截材质底），长页面也不会把框撑出视口。 */
+    flex:1 1 auto;min-height:0;
+    /* ★ 滚动的就是它 —— 框自己不动 */
+    overflow-y:auto;overflow-x:hidden;
+    /* ★ 2026-09-28：预留滚动条槽。切页时内容要上浮 25vh，那段时间滚动高度会临时变大；
+       若槽位是"按需出现"，就会闪一下滚动条、内容宽度跟着跳 12px。预留之后
+       有没有滚动条都占同一格 ⇒ 配合下面 .animating 那条，上浮期间一点位移都不会有。 */
+    scrollbar-gutter:stable;
+    overscroll-behavior:contain;
+    background:var(--fill-frame);
+    /* ★ 2026-09-21 撤掉 1px 描边。实测参考图（拯救者工具箱）的外框是**纯填充差**：
+       左边缘 #4E4E4E → #5B5B5B 一步到位、没有更亮的那 1px；只有顶边有一条极淡的高光
+       （Δ7 左右）。原来那圈描边挨着侧栏时会被读成"又一根竖线"，正是主人指的那条。
+       所以：填充 + 圆角 + 顶边高光，不要描边。 */
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.04);
+    /* ★ 2026-09-22 第十五轮：主人"圆角太方了，再圆一点点和程序圆角保持一致"。
+       上一轮严格同心给的 1px 看着就是直角，主人不要。本轮直接给 **8px（= --rd-win）**：
+       明显圆角、与窗口那圈 9px 大圆角**接近且同为圆角**（不再是"方角 vs 大圆角"打架）。
+       ⚠ 这**放弃严格同心**（同心只有 r=9−d=1 才成立）；r=8 与窗口 r=9 是"两道都很圆的弧、
+       半径差 1px"，视觉读作一套。要**真正完全重叠**（r 也=9 且平行）只有 d=0 贴边，
+       而贴边会退回"两块颜色没对齐"的错位感（第十三轮已否），故不取。
+       外框与卡片同走 8px：**层级差靠填充色 + 边距**体现，不靠圆角（Win11 设置页也是外层/卡片同圆角）。 */
+    border-radius:8px;
+    padding:18px 20px 22px;
+  }
+  /* 卡片在外框里再亮一档（4% 上再叠 5%，合计约 9% ⇒ 比外框高 11 个色阶） */
+  .page .card{background:var(--fill-card);}
+  .page-head{font-size:19px;font-weight:600;margin-bottom:4px;}
+  .page-sub{color:var(--text-dim);font-size:12.5px;margin-bottom:18px;line-height:1.7;}
+
+  .card{background:var(--bg-card);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border:1px solid var(--line-card);border-radius:var(--rd-win);padding:20px 22px;max-width:780px;margin:14px 0;}
+  .row{display:flex;align-items:center;gap:12px;margin:14px 0;}
+  .row > label{flex:0 0 120px;color:var(--text-dim);font-size:13px;}
+  .row .ctl{flex:1;display:flex;align-items:center;gap:10px;}
+  input[type=text],input[type=number],select,textarea{
+    width:100%;padding:9px 12px;border-radius:var(--rd-ctl);border:1px solid var(--line-card);
+    background:var(--bg-input);color:var(--text);font-size:13.5px;outline:none;font-family:inherit;
+  }
+  input:focus,select:focus{border-color:var(--accent);}
+  /* ★ 2026-09-28：标准按钮的**外观**（填充 / 描边 / "按下比悬停更暗"）由 shell-ui.css 的
+     --ct-* 那层接管（该文件后加载、同优先级胜出）。这里只留**盒模型** ——
+     Win11 标准按钮高 32px、左右内边距 14px、图标与文字间距 7px。
+     原先 padding:9px 16px 会长到 ~36px，比系统控件高一头。 */
+  button.btn{min-height:32px;padding:0 14px;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    border-radius:var(--rd-ctl);border:1px solid var(--line-card);background:var(--fill-ctl);color:var(--text);cursor:pointer;font-size:13px;transition:background .15s,border-color .15s;white-space:nowrap;font-family:inherit;}
+  button.btn:hover{background:var(--fill-strong);}
+  button.btn:disabled{opacity:.45;cursor:default;}
+  /* ★ 2026-09-28 主人："整个界面包括按钮不具备一模一样的 Windows11 风格及效果"。
+     主按钮原来是「width:100% 铺满 + 蓝渐变 + 一圈蓝色投影」，这三样没有一样是 Win11 的：
+       · Win11 的强调按钮是**内容宽度**（跟着字走），没有"整条铺满的蓝色横杠"；
+       · 填充是**实心单色**，渐变正是"网页味"的来源；
+       · **不带投影** —— 投影在 Win11 里专属浮层（对话框 / 菜单），不长在按钮上。
+     现在：删掉 width / 渐变 / glow；实心色与描边交给 shell-ui.css 的 accent 那层
+     （4px 圆角 + 顶边更亮 + 悬停提亮、按下压暗），高度对齐 Win11 的 32px。 */
+  button.primary{margin-top:8px;min-height:32px;padding:0 18px;border:none;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    border-radius:var(--rd-ctl);font-size:14px;font-weight:600;color:var(--on-accent);
+    transition:transform var(--fl-dur-xfast) var(--fl-ease-std);font-family:inherit;}
+  button.primary:active{transform:scale(.98);}
+  button.primary:disabled{cursor:default;transform:none;}
+
+  /* ★ 2026-09-28 主人："图 2 这块（虚线框）不具备 Windows11 风格"。
+     原来是 **2px 虚线**框 —— 虚线描边是"网页上传控件"的标志，Win11 里没有任何一块区域
+     用虚线画边界。改成**实线 + 淡填充**的"可投放卡片"：1px --ct-line 描边、--cd-fill 淡底
+     （这两个 token 来自 shell-ui.css，深浅两色自动对），悬停时描边转主色、底略微点亮。
+     再配一枚 music 图标（见 HTML 的 .drop-ico）—— 系统里的空状态一律是"一枚图标 + 一句话"，
+     光有文字块看着就是个 div。 */
+  .drop{border:1px solid var(--ct-line);background:var(--ct-fill);border-radius:var(--rd-win);padding:34px 20px;text-align:center;cursor:pointer;
+    transition:border-color var(--fl-dur-fast) var(--fl-ease-std),background var(--fl-dur-fast) var(--fl-ease-std);}
+  .drop:hover{border-color:var(--fl-accent,var(--accent));background:var(--fill-hover);}
+  .drop-ico{width:40px;height:40px;margin:0 auto 12px;color:var(--text-dim);}
+  .drop-ico .ico{width:40px;height:40px;stroke-width:1.2;}
+  .drop .big{font-size:16px;font-weight:600;margin-bottom:6px;}
+  .drop .small{font-size:12px;color:var(--text-dim);}
+  .drop.chosen{border-color:var(--ok);background:rgba(63,185,80,0.08);}
+
+  /* ★★ 精度卡折叠区（OSN1 ⇄ MuScriptor 那套"手风琴"）
+     ★ 2026-09-29 第十轮**改了结构**：外面多包一层 `.prec-inner`（原来三张 .pcard 直接当网格项）。
+     为什么非包不可 —— 主人报的 bug（截图）："这个中间空这么大咋回事"：生成页第 2 步在 OSN1
+     档下，采点方式行与「当前选择」之间空出约 180~260px 的纯空白，切档也不消失。
+     两层根因，缺一不可：
+       ① `grid-template-rows:0fr` 只把**轨道的可用空间**压到 0，而轨道下限默认是
+          `minmax(auto,0fr)` —— 这个 `auto` = 网格项的 min-content 贡献。`.pcard` 是
+          `min-height:auto` + `overflow:visible` ⇒ 自动最小尺寸 = 内容高度（实测 181.4px）
+          ⇒ **轨道被内容顶住**，怎么也塌不到 0（三张卡 `opacity:0` 看不见，实体照样占位）。
+       ② 只给 `.pcard` 补 `min-height:0` **也不够**：卡片自带 `padding:18px 16px` + 1px 边框，
+          盒模型自身的下限就是 18×2+1×2 = **38px**，轨道停在 38px（实测过）。
+     ⇒ 正解 = 照本文件自己的既有模式（`.stem-body > .stem-inner`、`.exp-body > .exp-inner`）：
+       网格项换成一层**无内边距、无边框**的 `.prec-inner`，给它 `min-height:0;overflow:hidden`
+       ⇒ 自动最小尺寸 0 ⇒ `0fr` 真塌到 0；三张卡保持自己的 padding，多出来的部分被 inner 裁掉。
+     ⚠ 同一个坑本文件已踩第三次（stem / exp 各一次，那两处注释都写着"必须 min-height:0"），
+       三次都撞在"忘了给那一层 inner 解锁"上 ⇒ 现已由 `tools/stepfold.js` 断言守着（含负对照）。 */
+  .precision{display:grid;grid-template-rows:1fr;margin-top:16px;
+    overflow:hidden;min-height:0;
+    transition:grid-template-rows var(--fl-dur-slow) var(--fl-ease-std),margin-top var(--fl-dur-slow) var(--fl-ease-std);}
+  /* 收起态：行高 0fr + 上间距归零 ⇒ 整个精度区平滑塌缩，不再靠 display:none 硬切 */
+  .precision.folded{grid-template-rows:0fr;margin-top:0;}
+  /* 🔴 这一层是命门：没有它 `0fr` 塌不干净（见上面长注释）。
+     ⚠ 别删；别把 padding / 边框往上挪到这一层（挪上来 = 又把下限顶回去）。 */
+  .precision > .prec-inner{min-height:0;overflow:hidden;display:grid;
+    grid-template-columns:repeat(3,1fr);gap:14px;}
+  /* ★ 2026-09-28：选型卡原来也是"2px 边 + 悬停上浮 2px + 选中一圈蓝色投影"——三样都不是
+     Win11 的写法。改成系统里的"可选卡"：
+       常态 = 1px --ct-line 描边 + 卡片淡底；
+       悬停 = 只**点亮底色**（不上浮：系统里的卡片不会飘起来）；
+       选中 = 主色描边 + 淡底 + 右上角一枚勾（勾的几何与 .mcard.sel 用的是同一份，
+              保证同屏两种选中角标长得完全一样）。 */
+  .pcard{border:1px solid var(--ct-line);border-radius:var(--rd-win);padding:18px 16px;cursor:pointer;background:var(--cd-fill);position:relative;
+    opacity:1;transform:none;
+    transition:border-color var(--fl-dur-fast) var(--fl-ease-std),background var(--fl-dur-fast) var(--fl-ease-std),
+               opacity var(--fl-dur) var(--fl-ease-dec),transform var(--fl-dur) var(--fl-ease-dec);}
+  /* ★ 2026-09-28（之三）：切到 MuScriptor 时三张精度卡错峰淡入滑入，去掉"啪一下弹出" */
+  .precision.folded .pcard{opacity:0;transform:translateY(10px);}
+  .precision:not(.folded) .pcard:nth-child(1){transition-delay:40ms;}
+  .precision:not(.folded) .pcard:nth-child(2){transition-delay:90ms;}
+  .precision:not(.folded) .pcard:nth-child(3){transition-delay:140ms;}
+  @media (prefers-reduced-motion: reduce){
+    .precision{transition:none!important;} .pcard{transition:none!important;}
+    .precision.folded .pcard{opacity:0!important;transform:none!important;}
+  }
+  .pcard:hover{border-color:var(--line-strong);background:var(--fill-hover);}
+  .pcard.sel{border-color:var(--fl-accent,var(--accent));background:var(--fill-hover);}
+  .pcard.sel::after{content:'';position:absolute;top:7px;right:7px;width:18px;height:18px;border-radius:50%;
+    background:var(--fl-accent,var(--accent)) center/16px 16px no-repeat
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.6 10.4 8.2 14 15.4 6.4' fill='none' stroke='%231B1B1B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");}
+  .pcard .name{font-size:16px;font-weight:700;margin-bottom:6px;}
+  .pcard .vram{font-size:13px;color:var(--accent);font-weight:600;margin-bottom:8px;}
+  .pcard .desc{font-size:12px;color:var(--text-dim);line-height:1.55;}
+
+  .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+  .badge.idle{background:var(--fill-strong);color:var(--text-dim);}
+  .badge.run{background:rgba(76,194,255,0.20);color:var(--badge-run-fg);}
+  .badge.ok{background:rgba(63,185,80,0.20);color:var(--ok);}
+  .badge.err{background:rgba(248,81,73,0.20);color:var(--err);}
+
+  .status{margin-top:14px;font-size:13px;color:var(--text-dim);min-height:18px;}
+  .status.ok{color:var(--ok);}
+  .status.err{color:var(--err);}
+  .hint{font-size:11.5px;color:var(--text-dim);line-height:1.55;}
+  .note{background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.20);border-radius:var(--rd-win);padding:10px 12px;font-size:12.5px;color:var(--text-dim);line-height:1.6;}
+  .note b{color:var(--text);}
+  .note.blue{background:rgba(76,194,255,0.08);border-color:rgba(76,194,255,0.22);}
+  .link{color:var(--accent);cursor:pointer;font-size:12.5px;}
+  .link:hover{text-decoration:underline;}
+
+  /* 生成页内嵌小步骤条
+     ★ 2026-09-28 主人（拿截图）："这里为什么不能被点击来返回上一级或者下一级。不需要重新选择
+       音乐的那个字了。" 原来这一条是三个纯装饰 <div>，想回上一步只能点下面那个「重新选择音乐」
+       文字链接。现在**每个踏步自己就是按钮**：点已走过的步骤就回到那一步，
+       那个文字链接随之下线（它想做的事由"点 1 选择音乐"接管）。
+       "3 生成"没有对应的 pane（生成进度走遮罩 + 日志区），属于动作步骤 ⇒ disabled、不可点。
+     ⚠ 状态类（active/done）挂在**按钮 .stp** 上而不是圆点 .n 上：文字颜色也要跟着变，
+       而 CSS 没有父选择器 —— 圆点配色改由 `.stp.active .n` 这类后代选择器取。 */
+  .mini-step{display:flex;align-items:center;gap:2px;margin-bottom:16px;font-size:12.5px;color:var(--text-dim);}
+  .mini-step .stp{display:inline-flex;align-items:center;gap:8px;margin-right:6px;
+    padding:3px 9px 3px 3px;border:0;background:transparent;color:inherit;font:inherit;
+    border-radius:var(--fl-r-ctl);cursor:pointer;
+    transition:background-color .12s var(--fl-ease-std),color .12s var(--fl-ease-std);}
+  .mini-step .stp:hover:not(:disabled){background:var(--ct-fill);color:var(--text);}
+  .mini-step .stp:active:not(:disabled){background:var(--ct-fill-active);}
+  /* "3 生成"是 disabled 的，但生成一开始它会被标成 .active ⇒ 那时别再压暗，
+     否则"当前进度"看着比已经走完的步骤还灰。 */
+  .mini-step .stp[disabled]{cursor:default;}
+  .mini-step .stp[disabled]:not(.active){opacity:.55;}
+  .mini-step .n{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--fill-chip);font-size:11px;font-weight:600;}
+  .mini-step .stp.active{color:var(--text);} .mini-step .stp.active .n{background:var(--accent);color:var(--on-accent);}
+  .mini-step .stp.done{color:var(--text);} .mini-step .stp.done .n{background:var(--ok);color:#06210d;}
+  /* ===== 生成页的步骤切换：**按方向滑**（前进向左、回退向右）=====
+     ★ 2026-09-28 主人："并且用户选择了音乐后直接向左滑动进的第二个界面。"
+       + 同日第二轮补充："返回上一级时不应该往右滑吗，你怎么做的还是向左滑？"
+       ⇒ 单向滑是错的：**前进**（1→2→3）旧的往左退、新的从右进；
+                          **回退**（2→1）整段镜像 —— 旧的往右退、新的从左进。
+       做法：进场从 ±56px 滑到 0；离场由 JS 先挂 .leaving / .leaving-back 淡出
+             （.16s，accelerate —— 离场用加速），再摘掉 .active 收尾。
+     ⚠ 为什么用 animation 而不是 transition：pane 靠 display 的 none/block 切换，
+       transition **抓不到 display 变化**（不补间）必然硬切；animation 在元素重新参与渲染时
+       会重新开始，正好是要的效果（与下面 ⑤ 遮罩/弹窗同一条理由）。 */
+  .step-pane{display:none;}
+  /* ⚠ 进场动画挂在 .anim / .anim-back 上、**不挂在 .active 上**：.active 在首屏就是有的，
+     若动画跟着 .active，页面一打开生成页就会同时演"外框上浮"和"步骤从左滑入"两段，
+     看着像斜着抖了一下。 这两个类只由 gotoStep() 在真正切步时临时加上。 */
+  .step-pane.active{display:block;}
+  .step-pane.active.anim       {animation:step-in-right  .34s var(--fl-ease-dec) both;}
+  .step-pane.active.anim-back  {animation:step-in-left   .34s var(--fl-ease-dec) both;}
+  .step-pane.active.leaving    {animation:step-out-left  .16s var(--fl-ease-acc) both;}
+  .step-pane.active.leaving-back{animation:step-out-right .16s var(--fl-ease-acc) both;}
+  @keyframes step-in-right  { from { opacity:0; transform:translateX(56px); }  to { opacity:1; transform:none; } }
+  @keyframes step-in-left   { from { opacity:0; transform:translateX(-56px); } to { opacity:1; transform:none; } }
+  @keyframes step-out-left  { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(-40px); } }
+  @keyframes step-out-right { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(40px); } }
+
+  /* 列表（历史 / 分轨 / 设置） */
+  .list{display:flex;flex-direction:column;gap:8px;max-width:780px;}
+  .item{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--line-card);border-radius:var(--rd-win);background:var(--bg-card);}
+  .item .meta{flex:1;min-width:0;}
+  .item .nm{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .sub{font-size:11.5px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .item .acts{display:flex;gap:8px;flex:0 0 auto;}
+  .empty{color:var(--text-dim);font-size:13px;padding:18px 4px;line-height:1.7;}
+  .kv{display:flex;gap:10px;font-size:12.5px;padding:6px 0;border-bottom:1px solid var(--border);}
+  .kv .k{color:var(--text-dim);flex:0 0 110px;}
+  .kv .v{color:var(--text);word-break:break-all;}
+
+  /* ===== ① 历史 MIDI 选择列表（工作台入口）===== */
+  .item.pick{cursor:pointer;user-select:none;}
+  .item.pick:hover{border-color:var(--border-2);background:var(--fill-hover);}
+  /* ★ 2026-09-28 主人："选中一行那个蓝光是网页味"（原话大意：整个界面要 Win11）。
+     选中态原来是「主色描边 + 一圈蓝色投影」，投影仍然不是 Win11 的写法。
+     Win11 的**列表选中**是「左侧一条主色竖条 + 淡填充」—— 一眼看得到是这一行被选中，
+     但整行不发光。竖条用 inset box-shadow 画：**不占布局**，不会把行里的文字挤位移。 */
+  .item.pick.sel{border-color:var(--fl-accent,var(--accent));background:var(--fill-hover);box-shadow:inset 3px 0 0 var(--fl-accent,var(--accent));}
+  /* ★ 2026-09-28：勾选框从"圆形单选点"改成 **Win11 的方形复选框**（4px 圆角）——
+     系统里多选/单选列表项用的是方框，圆点是"网页单选"的形态。
+     选中 = 填主色 + 一枚白勾（勾的几何与选型卡、材质卡共用同一份）。 */
+  .item .tick{width:18px;flex:0 0 18px;height:18px;border-radius:4px;border:1px solid var(--ct-line);box-sizing:border-box;
+    background-repeat:no-repeat;background-position:center;background-size:13px 13px;}
+  .item.pick.sel .tick{border-color:var(--fl-accent,var(--accent));background-color:var(--fl-accent,var(--accent));
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.6 10.4 8.2 14 15.4 6.4' fill='none' stroke='%231B1B1B' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");}
+  /* ★ 2026-09-28（之二）：勾的描边是 data-URI，**吃不到 CSS 变量** ⇒ 必须按主题各写一份。
+     深色主色是浅蓝 (#4CC2FF) ⇒ 勾用近黑（上面三处）；浅色主色是深蓝 (#0F6CBD/#1F63D6) ⇒ 勾用白。
+     不补这一条，浅色下就是"深蓝底 + 黑勾"，等于看不见勾。 */
+  html[data-theme="light"] .pcard.sel::after,
+  html[data-theme="light"] .mcard.sel::after{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.6 10.4 8.2 14 15.4 6.4' fill='none' stroke='%23fff' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");}
+  html[data-theme="light"] .item.pick.sel .tick{
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.6 10.4 8.2 14 15.4 6.4' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");}
+  .tag{display:inline-block;padding:1px 8px;border-radius:20px;font-size:10.5px;font-weight:600;margin-left:6px;vertical-align:1px;}
+  .tag.ok{background:rgba(63,185,80,.18);color:var(--ok);}
+  .tag.no{background:var(--fill-hover);color:var(--text-dim);}
+  .tag.warn{background:rgba(251,191,36,.16);color:var(--warn);}
+
+  /* ===== ② 界面材质选择卡 ===== */
+  /* 四档（2026-09-22 加了「标签页」）⇒ **不写死列数**，交给 auto-fit：
+     卡片数由宿主发过来（老壳只有三档、将来还可能增删），写死 3 或 4 都会留空或挤掉。
+     用 minmax(140px,1fr)：宽窗口一行铺满、窄窗口自动折行，也不会出现
+     "1fr 的 min-content 下限被卡里那句说明文字顶住 ⇒ 整体溢出"（在别处踩过一次）。 */
+  .matgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-top:4px;}
+  .mcard{border:2px solid var(--line-card);border-radius:var(--rd-win);padding:14px 12px;cursor:pointer;background:var(--bg-card);text-align:center;position:relative;
+    transition:border-color var(--fl-dur-fast) var(--fl-ease-std),background var(--fl-dur-fast) var(--fl-ease-std),transform var(--fl-dur-fast) var(--fl-ease-dec);}
+  .mcard:hover{border-color:var(--border-2);transform:translateY(-1px);}
+  .mcard:active{transform:translateY(0) scale(.985);}
+  .mcard.sel{border-color:var(--accent);background:rgba(76,194,255,0.10);}
+  /* 选中角标：实心圆 + 白勾。Win11 的选择控件都是「选中 = 右上角一个勾」，
+     比只换边框颜色更容易一眼扫到当前档位。
+
+     ★★ 2026-09-22 主人："你看这个对勾都歪了"。根因**不是**角度调得不好，是画法本身错了：
+       原来用 `width:7px;height:3.5px` + `border-left` + `border-bottom` 折出一个 L 再
+       `rotate(-45deg)`。L 的拐点落在**左下**，转 -45° 之后两笔都指向**右边** ⇒ 画出来是
+       「＞」而不是「✓」（✓ 的拐点在下方、短笔朝左上、长笔朝右上）。而且 7:3.5 的 2:1 盒子
+       让两笔长短也反了。这属于"形状错了"，再怎么微调角度也就那样。
+     ⇒ 换成 **图标集里同一支 check 路径**（shell-ui.js 的 ICONS.check：
+       viewBox 0 0 20 20、`M4.6 10.4 8.2 14 15.4 6.4` —— 拐点在下、短笔朝左上）当背景图，
+       由 `background-position:center` 居中。几何是确定的，不受盒子宽高比影响。
+       ⚠ 勾必须由**背景图**画、不能由 ::before 画：伪元素没法既居中又旋转得刚好，
+         而背景图的 center 是浏览器算的，没有手算误差。 */
+  .mcard.sel::after{content:'';position:absolute;top:7px;right:7px;width:18px;height:18px;border-radius:50%;
+    background:var(--accent) center/16px 16px no-repeat
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M4.6 10.4 8.2 14 15.4 6.4' fill='none' stroke='%231B1B1B' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");}
+  /* ★ 2026-09-22 主人裁定：**撤掉卡片里的材质预览框**（原来一块 38px 的色块）。
+     原话是"也不要显示材质预览框，直接有切换就行"。
+     预览框想表达"这档长什么样"，但它跟真实材质（DWM 画的、还随桌面壁纸走）本来就对不上，
+     几张卡并排反而被读成"四个色号"。不如只留名字 + 一句说明。 */
+  .mcard .mn{font-size:12.5px;font-weight:600;}
+  .mcard .md2{font-size:10.5px;color:var(--text-dim);margin-top:3px;line-height:1.4;}
+
+  /* ===== ②b 深浅外观（深色 / 浅色）=====
+     ★ 2026-09-22 第二轮改法：原来这两粒胶囊挂在云母/实色的**卡片里**、
+     "选中那张卡才跳出来"。主人看了截图说"不要这么显示了，我看到亚克力也有白色版本，
+     所以直接新开一个位置显示深色浅色切换就行" ——
+     ⇒ 挪到材质格**下面另起一行**，做成全局开关，**始终可见**。
+     理由本来就该如此：明暗不属于某一档材质（亚克力/标签页也有浅色版），
+     它是全局外观；旧版靠 appinfo.materials 里的 per-material appearances 决定显不显示，
+     那个字段已随这次改动一起删掉（见 Materials.cs 注释）。
+     形态照主人的参考截图：**两粒独立胶囊**（未选=银底细边、选中=蓝边蓝底），
+     不是连体分段控件 —— 换形态属于没让人要求过的重设计，不做。 */
+  .appear-row{
+    display:flex;align-items:center;gap:16px;
+    margin-top:16px;padding-top:16px;border-top:1px solid var(--border);
+  }
+  .appear-row .txt{flex:1;min-width:0;}
+  .appear-row .txt .t{font-size:13px;font-weight:600;}
+  .appear-row .txt .d{font-size:11.5px;color:var(--text-dim);margin-top:3px;line-height:1.5;}
+  .appseg{display:flex;flex:0 0 auto;gap:6px;}
+  .appseg .dl{
+    border:1px solid var(--line-card);background:var(--fill-ctl);color:var(--text-dim);
+    border-radius:20px;padding:4px 15px;font-size:12px;line-height:1.5;cursor:pointer;font-family:inherit;
+    transition:background var(--fl-dur-fast) var(--fl-ease-std),color var(--fl-dur-fast) var(--fl-ease-std),
+               border-color var(--fl-dur-fast) var(--fl-ease-std);
+  }
+  .appseg .dl:hover{background:var(--fill-strong);color:var(--text);}
+  .appseg .dl.on{border-color:var(--accent);color:var(--text);background:rgba(76,194,255,0.16);}
+  /* ★ 2026-09-22 第三轮：材质 / 深浅这两个下拉已改成**自绘 ComboBox**
+     （`ShellUI.Dropdown` + `.dd` / `.dd-menu`）。
+     原来这里那条 `.selctrl{...}` 是给原生 <select> 补盒模型的，随 <select> 一起去掉；
+     现在的外观全部在 shell-ui.css ⑦ 段（触发器 32px / 4px 圆角 / 底边焦点线、浮出菜单
+     8px 圆角 + 投影 + 选中行左侧主色竖条）。
+     ⚠ 顺带解掉了原来那条 `width:auto` 的坑：本文件上面有一条全局 `select{width:100%}`，
+       会把"深浅外观"那个下拉撑满整行、把左边 `.txt` 挤成 0 宽（表现为四个字竖排）。
+       自绘触发器不是 <select>，那条全局规则管不到它 —— 真因连根没了。 */
+
+  /* ===== ③ Markdown（关于页 explain.md）===== */
+  .md{font-size:13px;line-height:1.75;color:var(--text);user-select:text;}
+  .md h1{font-size:19px;font-weight:700;margin:2px 0 10px;}
+  .md h2{font-size:16px;font-weight:600;margin:18px 0 8px;}
+  .md h3{font-size:14px;font-weight:600;margin:14px 0 6px;color:var(--md-head);}
+  .md h4,.md h5,.md h6{font-size:13px;font-weight:600;margin:12px 0 6px;color:var(--md-head);}
+  .md p{margin:8px 0;}
+  .md ul,.md ol{margin:8px 0 8px 20px;padding:0;}
+  .md li{margin:3px 0;}
+  .md code{background:var(--fill-chip);border-radius:5px;padding:1px 5px;font-family:Consolas,"Courier New",monospace;font-size:12px;}
+  .md pre{background:rgba(0,0,0,.34);border:1px solid var(--line-card);border-radius:var(--rd-win);padding:10px 12px;overflow:auto;margin:10px 0;}
+  .md pre code{background:none;padding:0;font-size:12px;line-height:1.55;}
+  .md blockquote{border-left:3px solid var(--line-strong);margin:10px 0;padding:2px 0 2px 12px;color:var(--text-dim);}
+  .md hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
+  .md a{color:var(--accent);}
+  .md table{border-collapse:collapse;margin:10px 0;font-size:12.5px;}
+  .md th,.md td{border:1px solid var(--border);padding:5px 10px;text-align:left;}
+  .md th{background:var(--fill-card);font-weight:600;}
+  .md img{max-width:100%;border-radius:8px;}
+
+  /* ===== ③.5 关于页 · 贡献者（照 GitHub 的 Contributors 抄）=====
+     写死的，不查网络也不读后端：开源包发出去以后，"关于"页照样有作者署名。
+     头像 = gui/avatar-linix.png / gui/avatar-idq.png，**文件本身已经裁成圆形**
+     （带 alpha，1px 抗锯齿），这里再加一层 border-radius:50% 兜底：
+     哪天主人换了张方图没重跑脚本，也不会变成方块。 */
+  .contrib-head{display:flex;align-items:center;gap:9px;font-size:15px;font-weight:600;margin-bottom:10px;}
+  .contrib-n{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:19px;
+             padding:0 6px;border-radius:10px;background:var(--fill-chip);color:var(--text-dim);
+             font-size:11px;font-weight:600;line-height:1;}
+  .contrib{display:flex;flex-direction:column;gap:2px;margin:0 -8px;}
+  .contrib a{display:flex;align-items:center;gap:11px;padding:5px 8px;border-radius:8px;
+             text-decoration:none;color:inherit;transition:background .12s ease;}
+  .contrib a:hover{background:var(--fill-chip);}
+  .contrib a:hover .who{text-decoration:underline;}
+  .contrib img{width:32px;height:32px;flex:0 0 32px;display:block;border-radius:50%;
+               object-fit:cover;background:var(--fill-chip);}
+  .contrib .who{font-size:14px;font-weight:600;color:var(--text);}
+
+  audio{width:100%;margin-top:6px;filter:invert(.9) hue-rotate(180deg);}
+  /* ★ 2026-09-22 主人裁定：分离试听从"6 条音轨平铺"改成**按歌曲折叠**。
+     只显示歌曲名，点击展开才露出分离好的各音轨（参考图：带箭头的折叠标题）。 */
+  .stem-group{margin-bottom:12px;border:1px solid var(--line-card);border-radius:var(--rd-win);background:var(--bg-card);max-width:780px;overflow:hidden;}
+  .stem-head{display:flex;align-items:center;gap:10px;padding:12px 14px;cursor:pointer;user-select:none;
+    transition:background var(--fl-dur-fast) var(--fl-ease-std);}
+  .stem-head:hover{background:var(--fill-strong);}
+  .stem-head .chev{flex:0 0 auto;width:14px;height:14px;color:var(--text-dim);
+    transition:transform var(--fl-dur-slow) var(--fl-ease-std);}
+  .stem-group.open .stem-head .chev{transform:rotate(90deg);}
+  .stem-head .hn{flex:1;min-width:0;font-size:13px;font-weight:600;}
+  .stem-head .hsub{font-size:11px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .stem-head .cnt{flex:0 0 auto;font-size:11px;color:var(--text-dim);}
+
+  /* ★ 2026-09-22 第三轮：主人"这里展开的时候没有推拉动画" ⇒ 给折叠体补上真正的推/拉。
+     旧写法是 `display:none ⇄ block` —— **display 根本不参与过渡**，所以只能硬切
+     （表现为"啪"地一下出现，下面的东西瞬间被顶走）。三条改法：
+       ① 折叠体改成 `display:grid` + `grid-template-rows:0fr⇄1fr`：展开那一帧由内容
+          **自然撑开**，收起时被压到 0 ⇒ 上下两侧的内容被平滑推开/收回，这才是"推拉"。
+          不写死 max-height（那等于赌一个够大的值，内容一多就露馅），
+          也不用 JS 量高度（量了还得管字体加载/换窗口大小，全是后患）。
+       ② 内边距**跟着一起过渡**：收起时若留着 `4px…12px` 的上下内边距，标题下面会
+          挂着一截 16px 的空白（看着像没收干净）。所以收起态是 `padding:0 14px`。
+       ③ 那道分隔线也一起淡入淡出（收起时透明）—— 否则标题下面会留一条孤零零的横线。
+     结构上多包了一层 `.stem-inner`：0fr 那一帧必须有个 `overflow:hidden;min-height:0`
+     的子盒去真正裁掉内容，padding 放在它身上才不会撑破轨道。
+     ★ 曲线用 `--fl-ease-std`（两端都缓）、时长用 `--fl-dur-slow`(.34s)：
+       我第一版抄了浮层的 `--fl-ease-dec`（快起慢停）+ .22s，逐帧一量才发现**第二个采样帧
+       就已经走掉一半**（1px→356px→552px）—— 700px 的大位移上那就是"啪"地弹出，
+       不是推拉。项目自己的动效规范里 decelerate 是给"浮层入场"的，
+       改变高度的形变要用 standard（`--fl-ease-std`）。时长同理：动的面积越大，
+       同一时长看着越快（这条是主人上几轮给切页动画的反馈）。 */
+  .stem-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows var(--fl-dur-slow) var(--fl-ease-std);}
+  .stem-body > .stem-inner{min-height:0;overflow:hidden;padding:0 14px;border-top:1px solid transparent;
+    transition:padding var(--fl-dur-slow) var(--fl-ease-std),border-color var(--fl-dur-slow) var(--fl-ease-std);}
+  .stem-group.open .stem-body{grid-template-rows:1fr;}
+  .stem-group.open .stem-body > .stem-inner{padding:4px 14px 12px;border-top-color:var(--border);}
+  @media (prefers-reduced-motion: reduce){
+    .stem-body,.stem-body > .stem-inner,.stem-head .chev{transition:none;}
+  }
+  .stem-row{margin:10px 0;}
+  .stem-row .nm{font-size:13px;font-weight:600;margin-bottom:2px;}
+  .stem-row .sub{font-size:11px;color:var(--text-dim);margin-bottom:4px;}
+
+  /* 生成进度面板（★ 2026-09-30 主人："那个灰色遮罩不好看，能不能直接一个延伸的动画把
+     开始生成按钮下面拉长，然后显示之前遮罩层上显示的内容"）
+     --------------------------------------------------------------------------
+     全屏灰遮罩（position:fixed + inset:0 + 深色 scrim + backdrop-filter）整个退役，
+     改成**按钮下方延伸出来的内联面板**：grid-template-rows 0fr ⇄ 1fr 做高度补间
+     （与 .exp / .precision 同一套手风琴，见铁律 25），展开时把下面内容往下推 ——
+     这就是主人要的"拉长"。它不再 fixed，所以不盖界面、也不需要 z-index。
+     ⚠ 网格项 .ot 必须"解锁"：无 padding/边框 + min-height:0;overflow:hidden，
+       否则它自带的内边距会给轨道钉住盒模型下限、0fr 塌不干净（本文件第四次踩这个坑）。
+     🔴 这个面板住在 .step-pane[data-pane="2"] 里面 ⇒ gotoStep(3) 绝不能摘掉 pane 2，
+        否则进度面板跟着一起消失（以前全屏遮罩盖着，看不出来）。见 gotoStep() 注释。 */
+  /* 🔴🔴 塌缩命门（本文件第五次同款坑）：**对齐绝不能写 align-items:start**！
+     本文件另外两处手风琴（.exp-body / .precision）都**没写** align-items ⇒ 默认 stretch ⇒
+     网格项被压到"轨道高度"（0fr 时就是 0），再靠 overflow:hidden 把内容剪干净。
+     一旦写了 align-items:start，网格项**不拉伸**、高度 = 自身内容高（实测 263px）⇒
+     grid-template-rows:0fr 只把**轨道**压成 0，而 .ot 自己还是 263px ⇒
+     overflow:hidden 什么都剪不到 ⇒ 面板"不占布局高度却把内容全画出来"，
+     正好盖在下面「三种采点方式怎么选」与蓝提示卡上。
+     （2026-09-30 主人截图报的"正在处理… 叠在卡片上"就是这个；探针 _leak_probe.mjs 已复现。）
+     ⇒ 默认 stretch：塌缩时 .ot 高 0 + overflow:hidden = 干净剪掉；展开时轨道=内容高。 */
+  #overlay{display:grid;grid-template-rows:0fr;
+    transition:grid-template-rows .34s var(--fl-ease-dec);}
+  #overlay.show{grid-template-rows:1fr;}
+  #overlay>.ot{min-height:0;overflow:hidden;}
+  #overlay>.ot>.ot-pad{padding-top:14px;}
+  #genProg{border:1px solid var(--line-card);border-radius:var(--rd-win);background:var(--bg-input);padding:14px 16px;}
+  /* 生成按钮右边那个转圈（★ 2026-09-30 主人："那个点点转圈圈放在开始生成按钮右边，
+     在那转。那个圆圈换成和开始生成按钮一样的颜色"）
+     --------------------------------------------------------------------------
+     仍然是 Windows 自己的启动字体字形：segoe_slboot.ttf 里 U+E052..U+E0CB 逐帧换字符
+     （Windows 自身就是这么转的，不是手画点阵）。
+     🔴 吃满整段区间，**末尾 5 个空白帧（U+E0C7..E0CB）必须保留** —— 那是每圈末尾约
+        165ms 的停顿。砍掉它，最后一点会直接接回下圈第一点，循环处"啪"一下很生硬。
+        （libwebp 把 5 个相同的空白帧合并成 1 帧 165ms，观感一样，只是存得紧凑。）
+     颜色 = 主按钮色：资源按主题分两版，深色 loader8.webp(#4CC2FF) / 浅色
+     loader8-light.webp(#0F6CBD)。单色平涂 ⇒ 不会有彩边。 */
+  .genbar{display:flex;align-items:center;gap:14px;margin-top:8px;}
+  .genbar>button.primary{margin-top:0;}
+  .gen-spin{display:none;width:24px;height:24px;flex:0 0 auto;
+    background:url(loader8.webp) center/contain no-repeat;}
+  .gen-spin.on{display:block;cursor:pointer;}
+  html[data-theme="light"] .gen-spin{background-image:url(loader8-light.webp);}
+  #overlayText{font-size:13.5px;font-weight:600;color:var(--text);line-height:1.6;}
+  #overlay .os{color:var(--text-dim);font-size:12.5px;margin-top:8px;}
+  #overlayTimer{color:var(--text-dim);font-size:12px;margin-top:6px;opacity:.85;}
+  #stageList{display:block;margin:12px 0 0;}
+  #stageList .st{display:flex;align-items:center;gap:11px;font-size:13px;color:var(--text-dim);padding:7px 0;}
+  #stageList .st .dot{width:12px;height:12px;border-radius:50%;border:2px solid var(--line-dot);flex:0 0 auto;box-sizing:border-box;}
+  #stageList .st.run{color:var(--text);}
+  /* 进行中 = Windows 11 原生 ProgressRing 的形状：官方弧逐帧（loader11.webp，
+     已裁到内容方框 + 染成 accent 蓝）。不再是 border-top-color:transparent
+     的 CSS 缺口环 —— 那是"网页味"的假转圈，跟 Windows 的转法不是一回事。
+     弧外径 = 待办态空心环外径(16px) ⇒ 步骤推进时整列不会跳。 */
+  #stageList .st.run .dot{border:0;background:url(loader11.webp) center/contain no-repeat;}
+  #stageList .st.ok{color:var(--text);}
+  /* 已完成 = 主人给的参考图那个样子：16px 实心蓝点 + 一圈柔和灰环（不再是绿点）。
+     参考图逐像素量过：点 16px #4CC2FF；环外径 31px ≈ spread 7.5px；环色正好等于
+     **白 12% 叠在 #2B2B2B 上**（0x2B + 0xD4*0.12 = 0x44/45，实测吻合）。
+     ⇒ 用 box-shadow spread 复现，环不写死纯色；浅色档换黑 7% 保持"柔"的观感。
+     行距 padding 3px→7px：环外径 31px，行高不够的话相邻两环会叠在一起。 */
+  #stageList .st.ok .dot{border:0;background:#4CC2FF;box-shadow:0 0 0 3px rgba(255,255,255,.18);}
+  html[data-theme="light"] #stageList .st.ok .dot{box-shadow:0 0 0 3px rgba(0,0,0,.10);}
+  #stageList .st.err{color:#FF99A4;}
+  #stageList .st.err .dot{border-color:#FF99A4;background:#FF99A4;}
+  #stageList .st .det{color:var(--text-dim);font-size:12px;}
+  /* ★ 2026-09-30：日志框以前住在深色遮罩里，现在住在浅色卡片里 ⇒ 底色/字色必须跟主题走，
+     否则浅色档下就是一块突兀的黑。 */
+  #genLog{margin-top:12px;max-height:190px;overflow:auto;text-align:left;
+    background:rgba(0,0,0,0.34);border:1px solid var(--line-card);border-radius:var(--rd-win);
+    padding:8px 10px;font:11.5px/1.5 Consolas,"Courier New",monospace;
+    color:var(--text-dim);white-space:pre-wrap;word-break:break-all;}
+  #genLog .l-err{color:#F85149;} #genLog .l-ok{color:#3FB950;} #genLog .l-warn{color:#D29922;}
+  html[data-theme="light"] #genLog{background:rgba(0,0,0,0.045);}
+  html[data-theme="light"] #genLog .l-err{color:#C0392B;}
+  html[data-theme="light"] #genLog .l-ok{color:#1A7F37;}
+  html[data-theme="light"] #genLog .l-warn{color:#9A6700;}
+  /* （原 #overlay.error / .done 里隐藏转圈的两条规则已删：转圈不在遮罩里了，
+      它的显隐只由 .gen-spin.on + genBusy() 负责。） */
+  #overlayClose{display:none;margin-top:12px;padding:7px 20px;border-radius:var(--rd-ctl);cursor:pointer;
+    border:1px solid var(--line-card);background:var(--fill-chip);color:var(--text);font-size:13px;font-family:inherit;}
+  #overlay.error #overlayClose{display:inline-block;}
+  #overlay.done #overlayClose{display:inline-block;}
+
+  /* ==========================================================================
+     Win11 动效层（2026-09-21）
+     --------------------------------------------------------------------------
+     曲线与时长全部取自 Fluent motion 规范，token 定义在 shell-ui.css（--fl-*）。
+     这一段是**覆盖式**的：与上面的规则同优先级、位置在后 ⇒ 只改"过渡与按压反馈"，
+     尺寸 / 颜色 / 布局一个字不动。要改外观别在这里改，去上面各自的规则里改。
+     ========================================================================== */
+
+  /* ① 可点控件统一走 standard 曲线（原先是浏览器默认的 ease，快慢很"网页"） */
+  button, .tb-btn, .link, .item, .pcard, .mcard, .drop, .nav, input, select, textarea {
+    transition-timing-function: var(--fl-ease-std);
+  }
+
+  /* ② 按压反馈：Win11 的控件按下去会轻微内缩、松手弹回 —— 这一下是"系统感"的关键 */
+  button.btn, .tb-btn, .nav, .item.pick, .mcard, .pcard {
+    transition-duration: var(--fl-dur-fast);
+  }
+  button.btn:active, .tb-btn:active { transform: scale(.975); }
+
+  /* ③ 主按钮：Win11 的强调按钮**不抬升、不加投影**（理由见上方 button.primary 那段）。
+     原来这里是"抬起来 1px + 阴影加深 0 10px 24px rgba(46,107,230,.42)"，属网页风；
+     本轮撤掉抬升与 glow，只留"按下轻微缩小"这一个反馈（系统控件那股按感）。
+     ⚠ 悬停变色由 shell-ui.css 的 accent 那层负责（提亮色值而不是叠 filter，色相不漂）。 */
+  button.primary {
+    transition: transform var(--fl-dur-xfast) var(--fl-ease-std),
+                background var(--fl-dur-fast) var(--fl-ease-std);
+  }
+  button.primary:hover { transform: none; box-shadow: none; }
+  button.primary:active { transform: scale(.98); }
+  button.primary:disabled { transform: none; box-shadow: none; }
+
+  /* ④ 页面切换：淡入 + 上浮落位
+     ★ 2026-09-22 主人(第十三轮)："他那个上浮动画再慢一点" ⇒ .6s。
+     ★ 2026-09-22 第十五轮：主人"切换上浮动画动静太小"。幅度 6px→16px、时长 .6s→.7s。
+     ★★ 2026-09-28 主人再提："侧边栏切换时整个页面上浮幅度特别小，不具有 Windows11 的
+       动画效果"。16px 在 940px 高的窗口里只有 1.7%，眼睛基本抓不到 ⇒ 本轮加到 **44px**
+       （约 4.7%，一眼能看出"页面从下面升上来落位"）。
+       时长**反而收到 .5s**：Win11 的进场是"快起慢停"（Fluent decelerate），
+       幅度大 + 时长长会读成"悠悠飘上来"，那是网页味；44px/.5s 才是系统的利落感。
+       ⚠ 仍就地写、不动 --fl-dur-slow（#nav-ind 与 shell-ui.css 过场吃它，那些 .34s 正合适）。
+     ★★ 2026-09-28 第二轮（主人拿截图）："页面里面的内容滑，框框不滑，框框固定不动" +
+       "Windows11 会稍微延迟一点点才触发界面切换"。⇒ 动画挂到 `.page.active` 的**直接子元素**
+       （`.page.active > *`）：外框（填充/圆角/滚动条）原地钉死，读起来就是"整块内容一起上浮"。
+       ★ 2026-09-29：时长 .48s→.34s（主人嫌上浮慢、要 Win11 利落感）、迟滞 70ms→100ms。
+       ⚠ 用**动画 delay** 而非 setTimeout 推迟 showPage：后者会真把"点标签→页面换好"拉开 100ms，
+         所有"点完立刻读 DOM"的探针都要重调时序；动画 delay 只做视觉迟滞，DOM 同帧换好。
+       ★★ 2026-09-29 第四轮（最终裁定）：主人明确"延迟 100ms 里**不是空白**——
+       是上一个页面花 100ms 快速渐隐，然后 100ms 后下一个界面浮上来"。
+       ⇒ 用**严格顺序**的两段：① 旧页挂 .leaving 跑 page-leave（opacity 1→0，.1s）渐隐；
+       ② 新页内容的 fl-rise-in 延迟正好 100ms，旧页渐隐期间新内容因 `both` fill 仍
+       opacity:0 透明 hold ⇒ **全程永不同显**，绝不会回到 9-29 那版"两页半透明同时叠着"
+       的叠字 bug（那版是旧页淡出与新页上浮**同时**进行才叠字，这里是先后）。
+     ⚠ 总时长：旧页渐隐 .1s + 新页 .34s 上浮 ≈ 440ms（pagemarginprobe 已同步把时长断言
+       改成 0.34s / 延迟 0.1s，并补旧页渐隐断言）。 */
+  /* 切页：新页内容 25vh 上浮 + 淡入（框不动）
+     ★ 动画在 .page.active 的**直接子元素**上（.page.active > * { fl-rise-in }）⇒
+       内容滑、外框钉死（主人 9-28 第二轮原话："页面里面的内容滑，框框不滑"）。
+       25vh = 视口高 1/4（"从视口上 1/4 处上浮"）；100ms 迟滞 = Win11"稍微延迟一点才触发"，
+       也正好等于旧页渐隐的 .1s —— 旧页隐没那一刻新内容才开始浮（严格顺序）。
+       ⚠ 这 100ms 里旧页在**渐隐**（不是空白、不是硬切），新内容 opacity:0 透明 hold。 */
+  .page.active > * { animation: fl-rise-in .34s var(--fl-ease-dec) 100ms both; }
+  /* 切页：旧页快速渐隐（~100ms）后再被摘除
+     ★ 2026-09-29 第四轮：主人最终裁定"延迟 100ms 里旧页渐隐、然后新页浮"。
+       - 旧页不立即消失：挂 .leaving 绝对定位叠在新页上方（z-index:2），跑 page-leave
+         （opacity 1→0，.1s）渐隐；pointer-events:none 不挡操作。
+       - 渐隐期间新内容 opacity:0 透明 hold（fl-rise-in 的 `both` fill + 100ms 延迟）
+         ⇒ 旧页渐隐时新内容还没显、新内容浮起时旧页已 opacity:0 ⇒ **永不同显、零叠字**。
+       - 渐隐完后 showPage 的独立 setTimeout 摘除 .leaving ⇒ 回归 display:none。
+       🔴 为什么绝不与新页"同时"做动画：本程序页面表面半透明（--fill-frame 深色档仅 4% 白），
+         两段若重叠就会两页文字同半透明压一起（9-29 交叉淡出版就是这么叠字的）。顺序执行规避之。 */
+  .page.leaving{
+    position:absolute;
+    /* ★ 2026-09-29 第五轮：inset 是相对**包含块的 padding box**，而旧页的静态位置在 #main
+       的**内容盒**里 ⇒ 必须显式退回四边页边，否则整张卡会往左上跳（左 2 / 上 8）并向右下
+       各扩 8px（读作"卡片突然变大贴到窗口边"）。
+       ⚠ 几何（padding / overflow-y / scrollbar-gutter / 圆角）不在这里写 ——
+         由上面 `.page.active, .page.leaving` 那条组选择器统一给，保证换类时盒模型一模一样。
+       🔴🔴 2026-09-29 第九轮（主人报"切页闪一下不透明的白色/黑色"+"两个卡片页重叠导致
+         颜色加深"，主人猜对了）：**旧页（渐隐幽灵）绝不许再画自己的外框底色**。
+         根因：上面组选择器把**同一份** `--fill-frame` 给了两页；切页瞬间新页外框已经铺满、
+         而旧页外框还全不透明地压在上头（z-index:2）⇒ 底色**被叠了两层**：
+           浅色 α 0.45 → 1−(0.55)² = 0.6975（+25% 白）⇒ 面板一下变白（就是那下"白闪"）；
+           深色 α 0.04 → 0.0784（+3.8% 白）⇒ 同源、轻一点。
+         `pagestack.js` 实测面板空白区均色：light `#B6B6B6→#D7D7D7`（Δ+33）、
+         dark `#1B1B1B→#232323`（Δ+8）。
+         ⇒ 幽灵页只负责"内容渐隐"；底色 + 顶边高光一律透明/去掉（新页外框已在同一位置提供，
+           颜色一模一样，去掉旧页那份视觉零损失、只消灭叠层）。 */
+    background:transparent;
+    box-shadow:none;
+    inset:var(--edge-t) var(--edge-r) var(--edge-b) var(--edge-l);
+    z-index:2;
+    pointer-events:none;
+    animation: page-leave .1s var(--fl-ease-acc) both;
+  }
+  @keyframes page-leave {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+  @keyframes fl-rise-in {
+    from { opacity: 0; transform: translateY(25vh); }
+    to   { opacity: 1; transform: none; }
+  }
+  /* 上浮期间的临时裁切：由 showPage() 在切页时挂上、约 600ms 后摘掉。
+     目的只有一个 —— 让"内容下移 25vh"不把 .page 的滚动高度撑大（否则会闪出滚动条/滚动条拇指）。
+     配合上面的 scrollbar-gutter:stable，auto↔hidden 来回切也不会让内容宽度跳。 */
+  .page.active.animating { overflow:hidden; }
+  /* ⑦「前往工作台」离场：整页向左滑出，配合宿主导航 = 连续左滑进工作台。
+     ★ 选择器比 .page.active 多一个类，特异性更高 ⇒ 加 .leaving-left 后盖掉入场动画。 */
+  .page.active.leaving-left { animation: leave-left .2s var(--fl-ease-acc) both; }
+  @keyframes leave-left {
+    from { opacity: 1; transform: none; }
+    to   { opacity: 0; transform: translateX(-48px); }
+  }
+  @keyframes fl-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+  /* ⑤ 遮罩与弹窗：淡入而不是啪一下出现。
+     ★ 用 animation 而不是 transition 是有意的：这两个元素靠 display 的 none/block 切换，
+       而 transition 抓不到 display 的变化（不会补间），一定会硬切；
+       animation 在元素从 display:none 重新参与渲染时会**重新开始**，正好是想要的效果。 */
+  #overlay.show { animation: fl-fade-in var(--fl-dur) var(--fl-ease-dec) both; }
+  #ibModal { animation: fl-fade-in var(--fl-dur) var(--fl-ease-dec) both; }
+
+  /* ⑥ 图标间距的两处例外（默认的 .38em 右边距是留给"图标 + 文字"的）：
+        · .nav 是 flex 容器（gap:11px 已经管了间距，再带右边距就双份）；
+        · #ibAbout 与窗口三键是纯图标按钮，后面没有文字。 */
+  .nav > .ico, #ibAbout > .ico, .win-btns .ico { margin-right: 0; }
+
+  /* ==========================================================================
+     ★★ 2026-09-28 新增：采点方式 = WinUI SelectorBar
+     --------------------------------------------------------------------------
+     原来「OSN1 采点模型 / MuScriptor 转谱」是两个各自独立的 .btn，选中那个由 setMode()
+     写**内联** background:var(--accent)+color:#fff。两个问题：
+       ① 视觉上是"两个按钮"，不是系统里那种"一条分段选择器"；
+       ② 切换是**硬切**（底色瞬间换过去）—— 主人要的"滑动过渡"根本没有。
+     现在改成 SelectorBar：一条容器 + N 个条目 + **一个会滑动的指示器**。
+     指示器是独立绝对定位元素，切项时同时过渡 translateX 与 width，
+     视觉上就是"那块高亮从上一个滑到下一个"。
+     ⚠ 指示器的位移用 transform:translateX（走合成），宽度用 width（条目文字长短不同，
+       必须变宽；只有 2 个条目，这点布局代价可以忽略）。
+     ⚠ 条目宽度**不写死**（各条文字不一样长），全部由 JS 量 offsetWidth/offsetLeft 写入。
+     ========================================================================== */
+  .selbar{position:relative;display:inline-flex;align-items:center;gap:4px;padding:3px;
+    border:1px solid var(--ct-line);border-radius:var(--rd-ctl);background:var(--cd-fill);}
+  .selbar .ind{position:absolute;top:3px;left:0;height:calc(100% - 6px);width:0;
+    border-radius:3px;background:var(--fl-accent,var(--accent));opacity:0;pointer-events:none;
+    transition:transform .32s var(--fl-ease-dec),width .32s var(--fl-ease-dec),opacity .2s var(--fl-ease-std);
+    will-change:transform,width;}
+  .selbar .it{position:relative;z-index:1;display:inline-flex;align-items:center;gap:7px;
+    min-height:28px;padding:0 14px;border:none;border-radius:3px;background:transparent;
+    color:var(--text-dim);cursor:pointer;font-size:12.5px;font-weight:600;
+    font-family:inherit;white-space:nowrap;
+    transition:color .2s var(--fl-ease-std);}
+  .selbar .it:hover{color:var(--text);}
+  .selbar .it[aria-selected="true"]{color:var(--on-accent);}
+  .selbar .it .ico{width:16px;height:16px;margin-right:0;}
+
+  /* ==========================================================================
+     ★★ 2026-09-28 新增：「三种采点方式怎么选」= Win11 Expander
+     --------------------------------------------------------------------------
+     原来用的是原生 <details>/<summary>，两个毛病（主人②："展开/折叠时没有动画"）：
+       ① 那个 ▸ 是浏览器自己的三角，不是 Fluent 的 chevron 笔法；
+       ② 展开/收起**无过渡**（原生 details 的高度在旧内核里没法用 CSS 补间）。
+     改成自绘 Expander：
+       · 头 = chevron（复用图标集的同一支路径）+ 标题，hover 点亮；
+       · 身用 `grid-template-rows: 0fr ⇄ 1fr` 推拉 —— **不用手量高度**的动画写法：
+         0fr / 1fr 是"有数值的分度"，浏览器会对它补间；里面再套一层 overflow:hidden，
+         收起时内容被裁掉而不是溢出去。
+       · chevron 展开时 rotate(90deg)（▸ → ▾），与身体同步走过渡。
+     ⚠ .exp-inner 必须 min-height:0 —— 否则 0fr 那条轨道的 min-content 下限会被内容顶住，
+       收起后仍留一截高度（这个坑在 .stem-body 那套折叠里踩过一次）。
+     ========================================================================== */
+  /* ★★ 2026-10-05 修主人截图报的「这三种采点方式怎么选这块颜色不太一样、边框特别厚」。
+     病根不在 token 取值，而在**同一层盒子被画了两遍**：
+     它外面套着 <div class="card" style="padding:0">（只为借卡片的 max-width / 外边距），
+     而 .exp 又自绘了边和底 ⇒ 两套边、两套底**直接叠在一起**。逐像素量主人截图（1240×429）：
+       · 边：卡片 1px（L=102）+ .exp 1px（L=107）**两条紧贴**；旁边普通卡片只有一条 ⇒ "边框特别的厚"。
+       · 底：卡片叠白 5%（L≈88.5）+ .exp 再叠白 3.5%（≈8.4%，L≈94.5），比普通卡片亮 6 阶 ⇒ "颜色不太一样"。
+       · solid 档因为底是不透明 #2f2f2f（不叠）、卡片边黑 10% 看不见，
+         只剩 .exp 那条白 7% 的边 ⇒ 主人："solid 下现在还是有边框，只不过变成细边框了"。
+     ⇒ .exp 不再自绘 border / background，只保留 **圆角 + overflow:hidden**
+       （这两样还得留着：把头部 hover 高亮裁进圆角里，否则会画出直角方块）。
+       盒子外观完全交给外层 .card ⇒ 与同页其它卡片**同底（5%）、同边（1px、同一 token）**，
+       三种材质一致；solid 档也只剩卡片那条黑 10% 发丝线。
+     ⚠ 别再往这里加 border/background —— 一加就回到"两套盒子叠着画"。 */
+  .exp{border:none;border-radius:var(--rd-win);background:transparent;overflow:hidden;}
+  .exp-head{display:flex;align-items:center;gap:9px;width:100%;min-height:46px;padding:0 16px;
+    border:none;background:transparent;color:var(--text);cursor:pointer;font-family:inherit;
+    font-size:15px;font-weight:600;text-align:left;
+    transition:background var(--fl-dur-fast) var(--fl-ease-std);}
+  .exp-head:hover{background:var(--fill-hover);}
+  .exp-head .chev{width:16px;height:16px;flex:0 0 16px;color:var(--text-dim);margin-right:0;
+    transition:transform .32s var(--fl-ease-dec),color var(--fl-dur-fast) var(--fl-ease-std);}
+  .exp-head:hover .chev{color:var(--text);}
+  .exp.open .exp-head .chev{transform:rotate(90deg);}
+  .exp-body{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s var(--fl-ease-dec);}
+  .exp.open .exp-body{grid-template-rows:1fr;}
+  .exp-inner{overflow:hidden;min-height:0;}
+  .exp-pad{padding:2px 16px 14px;font-size:12.5px;line-height:1.8;}
+
+  /* ⑦ 无障碍：系统里关了动画效果就全部停掉（这条优先于上面所有观感考虑） */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+  }
+</style>
+<!-- Win11/Fluent 观感层：动效曲线、图标盒模型、滚动条、Reveal 高亮、材质过场。
+     ★ 必须放在上面那份内联样式**之后** —— 两边同为作者样式，同优先级时后者胜出，
+       顺序颠倒的话卷轴条 / 焦点环这些会被页面自己的旧写法压回去。 -->
+<link rel="stylesheet" href="shell-ui.css">
+</head>
+<body>
+  <div id="titlebar">
+    <div class="title">ADOFAI Studio</div>
+    <div class="spacer"></div>
+    <button class="tb-btn" id="ibAbout" title="参数说明 / 关于" data-ico="info"></button>
+    <div class="win-btns">
+      <button id="minBtn" title="最小化" data-ico="minus"></button>
+      <button id="maxBtn" title="最大化" data-ico="square"></button>
+      <button id="closeBtn" title="关闭" data-ico="close"></button>
+    </div>
+  </div>
+
+  <div id="body">
+    <!-- ===== 侧边栏（旧版风格） ===== -->
+    <div id="sidebar">
+      <!-- 选中指示条：一根**会在各项之间滑动**的条（不是每项各挂一条伪元素）。
+           伪元素挂在各自项上，切页时只能"旧的消失、新的出现"，做不出连续位移；
+           一个独立元素才能 translateY 滑过去 —— Win11 NavigationView 就是这么做的。
+           位置/颜色由 shell-ui.js 的 syncNavInd() 按选中项算。
+           ★ 2026-09-22：侧栏改成任务管理器式 —— 顶部一个汉堡开关，默认折叠（只图标），
+             点一下展开成「图标 + 文字」；设置/关于被钉在左下角。 -->
+      <span id="nav-ind" aria-hidden="true"></span>
+      <!-- 折叠开关：默认折叠，点一下展开。图标由 shell-ui.js 的 ICONS.menu 注入 -->
+      <button id="navToggle" class="nav-toggle" data-ico="menu" title="展开 / 收起导航" aria-label="展开或收起导航"></button>
+      <div class="nav-group">
+        <div class="nav shell-reveal active" data-page="generate" data-ico="music"><span class="lbl">生成</span></div>
+        <div class="nav shell-reveal" data-page="workbench" data-ico="panel"><span class="lbl">工作台</span></div>
+        <div class="nav shell-reveal" data-page="separate" data-ico="layers"><span class="lbl">分离</span></div>
+        <div class="nav shell-reveal" data-page="history" data-ico="clock"><span class="lbl">历史</span></div>
+        <div class="nav shell-reveal" data-page="train" data-ico="flash"><span class="lbl">训练</span></div>
+      </div>
+      <!-- ★ 2026-09-22：删掉了这里原来的 <div class="nav-sep"> 横线和 <div class="foot" id="sideFoot">就绪</div>。
+           前者主人问"为什么要画一条横线"，后者是死文案且和底组抢 margin-top:auto。
+           现在设置/关于就是侧栏最后两项，由 .nav-group.bottom 的 margin-top:auto 钉到底部。 -->
+      <div class="nav-group bottom">
+        <div class="nav shell-reveal" data-page="settings" data-ico="settings"><span class="lbl">设置</span></div>
+        <div class="nav shell-reveal" data-page="about" data-ico="info"><span class="lbl">关于</span></div>
+      </div>
+    </div>
+
+    <!-- ===== 内容区 ===== -->
+    <div id="main">
+      <!-- ① 生成谱面 -->
+      <section class="page active" id="page-generate">
+        <div class="page-head">生成谱面</div>
+        <div class="page-sub" id="genSub">载入一首歌曲。生成时先做 BS-RoFormer-SW 六轨分离，再用 OSN1 采点模型对每条音轨分别踩点，汇总成时间戳交给Adofai-Chart-Generator算法出谱。</div>
+        <div class="card">
+          <!-- ★ 2026-09-28：三个踏步从"纯装饰 div"改成**可点按钮** —— 点已走过的步骤回到那一步。
+               data-s 挪到按钮上（原来挂在圆点 .n 上，现在状态类也由按钮承载，见 gotoStep()）。
+               第 3 步没有对应 pane（生成进度走遮罩 + 日志），所以 disabled：它只作为进度显示。 -->
+          <div class="mini-step" id="miniStep">
+            <button class="stp" type="button" data-s="1"><span class="n">1</span><span>选择音乐</span></button>
+            <button class="stp" type="button" data-s="2"><span class="n">2</span><span id="step2Label">选择采点方式</span></button>
+            <button class="stp" type="button" data-s="3" disabled aria-disabled="true"><span class="n">3</span><span>生成</span></button>
+          </div>
+          <div class="step-pane active" data-pane="1">
+            <div class="drop" id="dropzone">
+              <div class="drop-ico" data-ico="music"></div>
+              <div class="big" id="dropBig">点击选择 / 拖入一首音乐</div>
+              <div class="small" id="dropSmall">支持 mp3 / wav / ogg / flac / m4a 等常见格式</div>
+            </div>
+            <div class="status" id="musicStatus">未选择文件</div>
+          </div>
+          <div class="step-pane" data-pane="2">
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <label id="modeLabel" style="font-size:14px;font-weight:600">采点方式</label>
+              <!-- ★ 2026-09-28：两个独立 .btn → WinUI **SelectorBar**（一条分段选择器 +
+                   会滑动的高亮块）。条目 id / data-mode 一律不变 —— setMode()、
+                   genmode_check.js 的抽取桩、以及页面自己的点击绑定都认这两样。
+                   选中态走 aria-selected（CSS 配色），不再由 JS 写内联 background。 -->
+              <div class="selbar" id="modeBar" role="tablist" aria-labelledby="modeLabel">
+                <span class="ind" id="modeInd" aria-hidden="true"></span>
+                <button class="it" role="tab" data-mode="osn1" id="modeOsn1" aria-selected="true" data-ico="sparkle">OSN1 采点模型</button>
+                <button class="it" role="tab" data-mode="muscriptor" id="modeMus" aria-selected="false" data-ico="path">MuScriptor 转谱</button>
+              </div>
+            </div>
+            <!-- ★ 2026-09-29 第十轮：三张精度卡外面**多包一层 .prec-inner**。
+                 原来 .pcard 直接当 `.precision` 的网格项 ⇒ 卡片自带的 padding+边框给轨道
+                 钉了个 38px 的盒模型下限（内容 181px 更是被 auto 下限顶住）⇒ 收起态塌不干净，
+                 第 2 步在 OSN1 档下留一块 180+px 的空白（主人报"中间空这么大"）。
+                 `.prec-inner` 无内边距无边框 + min-height:0;overflow:hidden ⇒ 0fr 才能真塌到 0。
+                 ⚠ 别把 .pcard 直接挪回 .precision 底下；`tools/stepfold.js` 有断言守着。 -->
+            <div class="precision folded" id="precisionGrid">
+              <div class="prec-inner">
+                <div class="pcard" data-size="small">
+                  <div class="name">Small</div>
+                  <div class="vram">≈ 2 GB 显存</div>
+                  <div class="desc">最轻量，转谱最快。配置较低的显卡（如入门独显 / 老卡）选它。</div>
+                </div>
+                <div class="pcard" data-size="medium">
+                  <div class="name">Medium</div>
+                  <div class="vram">≈ 4 GB 显存</div>
+                  <div class="desc">均衡档，质量与速度兼顾。大多数独显都能跑。</div>
+                </div>
+                <div class="pcard" data-size="large">
+                  <div class="name">Large</div>
+                  <div class="vram">≈ 12 GB 显存（8 GB 卡走 CPU+GPU 混合）</div>
+                  <div class="desc">最高质量，转谱最慢、最吃显存。12 GB 以上显卡最合适；8 GB 卡会自动启用 CPU+GPU 混合推理（部分层留在 CPU），能跑，但比 Medium 慢。</div>
+                </div>
+              </div>
+            </div>
+            <div class="hint" style="margin-top:12px">当前选择：<b id="precLabel" style="color:var(--text)">未选择</b></div>
+            <div class="bpm-row" style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <label for="baseBpm" style="font-size:14px;font-weight:600">基础 BPM（替换模型识别值）</label>
+              <!-- ★ 2026-09-28 修主人报的"浅色模式这个框还是固执的黑色"。
+                   根因**就在这行内联样式**里：`background:var(--input-bg,#1c1c22)` ——
+                   而 `--input-bg` 这个变量**全项目从来没有定义过**（本页写的是 --bg-input，
+                   少一个 g），于是 fallback 永远生效 ⇒ 这个框在浅色主题下也钉死成深灰 #1c1c22。
+                   顺带它还自带 border-radius:8px + border:1px --border，把 shell-ui.css 那层
+                   Win11 TextBox 皮肤（4px 圆角 / 底边更亮 / 聚焦转 2px 主色底边）全压掉了。
+                   ⇒ 正确做法：别在这儿写外观，只留**宽度**，其余交给 shell-ui.css 的输入框皮肤。
+                      这样深浅两色自动都对，聚焦也有系统的下划线动效。 -->
+              <input id="baseBpm" type="number" min="40" max="400" step="1" placeholder="如 180"
+                     style="width:110px" />
+              <span class="tag warn" style="cursor:default" title="MuScriptor 转谱出的 BPM 不准，这里填你自己的基础 BPM 覆盖它">模型写的 BPM 不准</span>
+            </div>
+            <!-- ★ 2026-09-30 主人："那个点点转圈圈放在开始生成按钮右边，在那转。"
+                 .gen-spin 是空壳：图由 CSS 的 background-image 给（深浅两档各一版、
+                 颜色 = 主按钮色），点它是"展开进度"的热区。 -->
+            <div class="genbar">
+              <button class="primary" id="genBtn" disabled data-ico="sparkle">开始生成</button>
+              <span class="gen-spin" id="genSpin" role="status" aria-label="正在生成" title="正在生成 · 点这里展开进度"></span>
+            </div>
+            <!-- ★ 2026-09-28 主人："不需要重新选择音乐的那个字了。"
+                 原来这里是 <span class="link" id="backToMusic">重新选择音乐</span>（唯一能回第 1 步的入口）。
+                 现在点顶部「1 选择音乐」就是回上一步 ⇒ 这个链接删掉，它扛的 margin-top:12px
+                 （原来在 .row 上，撑开与生成按钮的间距）挪到下面的状态行，间距不变。 -->
+            <!-- ★ 生成进度（原来是全屏灰遮罩）—— 现在是**按钮下方延伸出来的内联面板**。
+                 CSS 见 #overlay：0fr ⇄ 1fr 高度补间，展开时把下面内容往下推 = "拉长"。
+                 🔴 它必须在 .step-pane[data-pane="2"] 之内，且 gotoStep(3) 不能摘掉 pane 2。
+                 各 id（overlayText / overlaySub / overlayTimer / stageList / genLog /
+                 overlayClose）保持不变 —— 探针与宿主自检都按这些 id 取数。 -->
+            <div id="overlay" aria-live="polite">
+              <div class="ot">
+                <div class="ot-pad">
+                  <div id="genProg">
+                    <div id="overlayText">正在处理…</div>
+                    <div class="os" id="overlaySub"></div>
+                    <div class="os" id="overlayTimer"></div>
+                    <div id="stageList">
+                      <div class="st" data-st="1"><div class="dot"></div><div>① 转 WAV（ffmpeg 44.1kHz 立体声） <span class="det"></span></div></div>
+                      <div class="st" data-st="2"><div class="dot"></div><div>② BS-RoFormer-SW 分离 6 轨 <span class="det"></span></div></div>
+                      <div class="st" data-st="3"><div class="dot"></div><div>③ OSN1 多轨采点（OnsetNet 6 音轨） <span class="det"></span></div></div>
+                      <div class="st" data-st="4"><div class="dot"></div><div>④ 汇总多轨时间戳 JSON <span class="det"></span></div></div>
+                      <div class="st" data-st="5"><div class="dot"></div><div>⑤ Adofai-Chart-Generator算法生成谱面 <span class="det"></span></div></div>
+                    </div>
+                    <div id="genLog"></div>
+                    <button id="overlayClose">收起</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="status" id="genStatus" style="margin-top:12px"></div>
+          </div>
+        </div>
+        <div class="card" style="padding:0">
+          <!-- ★ 2026-09-28：原生 <details>/<summary> → 自绘 **Win11 Expander**（样式见 CSS 的 .exp 段）。
+               换掉的理由有两条，都是主人点出来的：
+                 ① 那个 ▸ 是浏览器自己画的三角，不是 Fluent 的 chevron 笔法；
+                 ② 展开/收起**没有动画**（原生 details 的高度没法用 CSS 补间）。
+               锚点约定：#pickHelp 仍是容器 id（探针按它取"说明区在不在 / 展开没展开"），
+               可点的是 .exp-head，展开态落在 #pickHelp 的 .open 类上。
+               ★ 2026-10-05：这张卡 padding:0 只是为了让 Expander 铺满（借它的 max-width / 外边距），
+                 **盒子的边和底一律由这张卡负责**，.exp 里绝不再写 border / background ——
+                 两套盒子叠着画就是主人报的"边框特别厚 + 颜色不太一样"（见 CSS .exp 段注释）。 -->
+          <div class="exp" id="pickHelp">
+            <button class="exp-head" id="pickHelpHead" aria-expanded="false" aria-controls="pickHelpBody">
+              <span class="chev" data-ico="chevron"></span>
+              三种采点方式怎么选
+            </button>
+            <div class="exp-body" id="pickHelpBody">
+              <div class="exp-inner">
+                <div class="exp-pad">
+                  <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+                    <b style="font-size:13.5px">osn1 · 自训练采点模型</b><span class="tag ok">已接通</span><br>
+                    <span style="color:var(--text-dim)">极度轻量，CPU 和 GPU 都能跑。效果良+，配上工作台里的走线算法可达优。需要你手动填 BPM 写进谱面。</span>
+                  </div>
+                  <div style="padding:10px 0;border-bottom:1px solid var(--border);opacity:.4;filter:grayscale(1)">
+                    <b style="font-size:13.5px">osn2 · OSU mug-diffusion 权重</b><span class="tag" style="background:var(--border);color:var(--text-dim)">功能开发中，敬请期待</span><br>
+                    <span style="color:var(--text-dim)">不需要分离，音频直接出谱。比较吃力，<b>需要有独立显卡</b>。效果良++，配上算法可达优。</span>
+                  </div>
+                  <div style="padding:10px 0">
+                    <b style="font-size:13.5px">midi · MuScriptor 转谱</b><span class="tag ok">当前可用</span><br>
+                    <span style="color:var(--text-dim)">最成熟的通路：先分离 6 轨，再逐轨转谱合成 MIDI。模型自己写的 BPM 全是错的，所以要你填一个基础 BPM 去替换。</span>
+                  </div>
+                  <div class="note" style="margin-top:12px">
+                    <b>精度档门槛（只影响采音准确度，不影响玩法与特效）</b><br>
+                    small —— 有核显或 2 GB 以上显存就能跑<br>
+                    medium —— 需要 4 GB 及以上显存的显卡<br>
+                    large —— 8 GB 显存，且已做 CPU 与 GPU 交火优化
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="note blue">
+            选音轨 / 参数微调 / 预览试听 / 导出 这些第三、四步的活，生成完会自动进入<b>Adofai-Chart-Generator 完整工作台</b>：
+            三栏布局、★谱面预览 / 钢琴卷帘 / 谱面路径 / 4K 下落式四个预览标签、全参数检查器、播放器、校验报告，全是原生的。
+          </div>
+        </div>
+      </section>
+
+      <!-- ② 工作台 -->
+      <section class="page" id="page-workbench">
+        <div class="page-head">Adofai-Chart-Generator</div>
+        <div class="page-sub">选音轨、参数微调、四视图预览、导出谱面，都在这里做。选一条生成过的 MIDI 进去，那次用的音乐会自动一起载入。</div>
+
+        <!-- 无历史 ⇒ 拦在这里，不给进（schedule 第 1 条） -->
+        <div class="card" id="wbEmptyCard" style="display:none">
+          <div class="empty" id="wbEmptyText">暂未对音乐采点或无历史记录，请生成后再试吧。</div>
+          <div class="row" style="margin:12px 0 0">
+            <div class="ctl"><button class="btn" id="wbGoGen" data-ico="sparkle">去「生成谱面」</button></div>
+          </div>
+        </div>
+
+        <!-- 有历史 ⇒ 列出所有生成过的 MIDI，选一条再前往 -->
+        <div id="wbPickWrap" style="display:none">
+          <div class="card" style="margin-bottom:12px">
+            <div class="row" style="margin:0">
+              <div class="ctl"><button class="primary" id="openWbBtn" style="margin-top:0" disabled data-ico="panel">前往工作台</button></div>
+            </div>
+            <div class="status" id="wbInfo" style="margin-top:12px">请先点选下面一条 MIDI。</div>
+          </div>
+          <div class="list" id="midiList"></div>
+        </div>
+
+        <div class="card">
+          <div class="note blue">
+            提示：工作台是Adofai-Chart-Generator自己的界面（独立页面），由宿主切换过去；返回时工作台左上角有「← 导入」回到本页。
+          </div>
+        </div>
+      </section>
+
+      <!-- ③ 分离试听 -->
+      <section class="page" id="page-separate">
+        <div class="page-head">分离试听</div>
+        <div class="page-sub">试听 BS-RoFormer-SW 分离出的各音轨（钢琴 / 吉他 / 贝斯 / 鼓 / 其它 / 人声）。先去「生成谱面」跑一次生成，这里才有产物。</div>
+        <div id="stemList" class="list"><div class="empty">还没有分离产物。先到「生成谱面」生成一次。</div></div>
+      </section>
+
+      <!-- ④ 历史记录 -->
+      <section class="page" id="page-history">
+        <div class="page-head">历史记录</div>
+        <div class="page-sub">已生成的谱面文件（output 目录下所有 .adofai）。可打开所在目录，或直接丢进工作台继续微调。</div>
+        <div id="histList" class="list"><div class="empty">载入中…</div></div>
+      </section>
+
+      <!-- ⑤ 设置 -->
+      <section class="page" id="page-settings">
+        <div class="page-head">设置</div>
+        <div class="page-sub">界面外观、目录与缓存管理。本项目铁律：产物一律落在 D 盘，绝不在 C 盘写大文件。</div>
+        <div class="card">
+          <div style="font-size:15px;font-weight:600;margin-bottom:10px">界面材质</div>
+          <!-- ★ 2026-09-22 主人裁定：材质改成下拉选框（原 4 张卡平铺 → 一个下拉）。
+               ★ 同日第三轮：**原生 <select> 换成自绘 ComboBox**。
+               下面这两个 <span> 只是**占位元素**：页面脚本起来后
+               ShellUI.Dropdown.create() 会把它原地换成一个 <button class="dd">，
+               id 与行内 style 原样继承 —— 所以 `$("matSelect")` 照旧拿得到，
+               `width:100%;max-width:340px` 这条宽度约束也跟着走。
+               为什么必须自绘：<select> 展开时那层弹窗由 Chromium 自己画、不在 DOM 里，
+               CSS 碰不到它 —— 永远是"系统灰 + 白框"。详见 shell-ui.css ⑦。 -->
+          <span id="matSelect" style="width:100%;max-width:340px"></span>
+          <div class="appear-row">
+            <div class="txt">
+              <div class="t">深浅外观</div>
+              <div class="d" id="appearDesc">深色：窗口偏暗，夜里看不刺眼</div>
+            </div>
+            <span id="appearSelect"></span>
+          </div>
+          <div class="status" id="matStatus" style="margin-top:10px"></div>
+        </div>
+        <div class="card" id="settingsCard">
+          <div class="empty">载入中…</div>
+        </div>
+        <div class="card">
+          <div class="row" style="margin:0">
+            <div class="ctl" style="gap:10px">
+              <button class="btn" id="openOutBtn" data-ico="folder">打开输出目录</button>
+              <button class="btn" id="cleanBtn" data-ico="trash">清理临时文件（.work / .tmp）</button>
+            </div>
+          </div>
+          <div class="status" id="cleanStatus" style="margin-top:12px"></div>
+        </div>
+      </section>
+
+      <!-- ⑥ 训练采点模型（schedule 第 9 条） -->
+      <section class="page" id="page-train">
+        <div class="page-head">训练采点模型</div>
+        <div class="page-sub">用你自己的歌曲继续训练采点模型（osn1），训练出更好的谱面。本页只做环境体检与入口 —— 训练进程必须在你在场时手动开始。</div>
+        <div class="card" id="trainCard"><div class="empty">体检中…</div></div>
+        <div class="status" id="trainRefreshHint" style="margin-top:10px"></div>
+        <div class="card">
+          <div class="note">
+            训练会长时间把显卡占满，中途别让电脑休眠。<br>
+            数据集要求：成对的<b>音频</b>（wav / mp3 / ogg / flac）与<b>谱面或踩点文件</b>，放在同一个目录里。
+          </div>
+        </div>
+      </section>
+
+      <!-- ⑦ 关于 -->
+      <section class="page" id="page-about">
+        <div class="page-head">关于</div>
+        <!-- ★ 2026-09-26 主人第二次裁定（拿截图）：标题底下那句"本程序由 <引擎> + <我们的壳> 组成"的
+             **自我署名整行删掉**（原文不在此复述，免得要发出去的包里还带着它）。
+             理由同上一条：这是**给开发者看的口径**，还写着"我们的"——用户点开「关于」
+             不该看我们怎么介绍自己拼了哪些零件。
+             间距不受影响：.page-head 留 4px，.card 自带 14px，合计与原 .page-sub 的 18px 一致。 -->
+        <div class="card">
+          <!-- ★ 2026-09-26 主人裁定（拿截图质问「程序里面不要写这句话」）：
+               「说明文档」标题底下原来还有一行小字，向用户解释本程序是怎么读这个 .md 的，
+               末尾还把本机的绝对路径（D:\…\gui\…）直接印在界面上 —— **整行删掉**。
+               理由：那是给开发者看的实现说明 + 主人自己的机器路径，而这套包是要发出去的；
+               用户点开「关于」，只该看见文档本身：标好标题、直接渲染正文，
+               别再解释程序自己怎么读文件、更别把硬盘路径当信息展示。
+               ⇒ 连 <span id="explainPath"> 一起删了（正常态没有可显示的路径）。
+                 路径只在**缺件**态还留着（那时它是"该把文件放哪儿"的指引，见 renderExplain）。 -->
+          <div style="font-size:15px;font-weight:600;margin-bottom:10px">说明文档</div>
+          <div class="md" id="aboutMd"><div class="empty">载入中…</div></div>
+          <div class="row" id="explainMissing" style="margin:12px 0 0;display:none">
+            <div class="ctl" style="gap:10px">
+              <button class="btn" id="mkExplainBtn">按此路径新建模板</button>
+              <button class="btn" id="openExplainDir">打开所在目录</button>
+            </div>
+          </div>
+          <div class="status" id="explainStatus" style="margin-top:10px"></div>
+        </div>
+        <div class="card" id="aboutCard">
+          <div class="empty">载入中…</div>
+        </div>
+        <!-- ★ 2026-10-05 主人裁定（拿 GitHub 截图）：贡献者**整块写死在页面里** ——
+             不查网络、不读后端、不列 Contributors API。头像已离线裁成圆形 PNG 随包分发
+             （生成器 gui/tools/mk_avatar.py），名字是跳 GitHub 的外链。
+             ⚠ **不显示链接文字**：GitHub 的贡献者卡片也是只给名字、URL 藏在 href 里，
+               这里照做 —— 别手贱把 https://… 当文本写出来。
+             ⚠ 外链点击由 C# 壳的 NewWindowRequested 接手、丢给系统默认浏览器；
+               否则 WebView2 会把整个应用界面导航成 github.com（见 MainWindow.xaml.cs）。 -->
+        <div class="card" id="contribCard">
+          <div class="contrib-head">贡献者<span class="contrib-n">2</span></div>
+          <div class="contrib">
+            <a href="https://github.com/LINIX099" target="_blank" rel="noopener noreferrer">
+              <img src="avatar-linix.png" alt="LINIX099" draggable="false">
+              <span class="who">LINIX099</span>
+            </a>
+            <a href="https://github.com/idqhonefully" target="_blank" rel="noopener noreferrer">
+              <img src="avatar-idq.png" alt="idqhonefully" draggable="false">
+              <span class="who">idqhonefully</span>
+            </a>
+          </div>
+        </div>
+        <div class="card">
+          <div class="note">
+            生成会跑完整链路：<br>
+            <span id="genChain">① ffmpeg 转 WAV（44.1k 立体声）　② BS-RoFormer-SW 分离 6 轨<br>③ OSN1 多轨采点（OnsetNet 6 音轨）　④ 汇总多轨时间戳 JSON　⑤ Adofai-Chart-Generator算法生成谱面（.adofai）</span>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 参数说明 / 关于（还原Adofai-Chart-Generator「?」帮助按钮） -->
+  <div id="ibModal" style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;z-index:99">
+    <div style="width:min(560px,90vw);background:var(--modal-bg);border:1px solid var(--border);border-radius:var(--rd-win);padding:20px 22px;box-shadow:0 12px 40px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 10px;color:var(--modal-accent);font-size:15px">参数说明 / 关于</h3>
+      <pre id="ibAboutBody" style="white-space:pre-wrap;color:var(--modal-body);font-size:12px;line-height:1.6;max-height:50vh;overflow:auto;margin:0"></pre>
+      <div style="display:flex;justify-content:flex-end;margin-top:12px">
+        <button id="ibAboutClose" style="padding:8px 18px;border:none;border-radius:var(--rd-ctl);cursor:pointer;font-size:13px;font-weight:600;color:#04121a;background:linear-gradient(180deg,#5fe3ff,#23b9e6)">知道了</button>
+      </div>
+    </div>
+  </div>
+
+<!-- Fluent 图标 sprite + 材质过场：必须在页面主脚本**之前** ——
+     主脚本里的按钮/卡片会直接调 window.ShellUI，晚一步就是"图标一个都不出来"。 -->
+<script src="shell-ui.js"></script>
+<script>
+(function(){
+  function post(obj){ try{ window.chrome.webview.postMessage(JSON.stringify(obj)); }catch(e){} }
+  var $ = function(id){ return document.getElementById(id); };
+
+  var AUDIO_PATH = "";
+  var PRECISION = "";
+  var GEN_MODE = "osn1";   // 采点方式：osn1（默认） / muscriptor
+  var GEN_MODE_RUN = "osn1";   // 发起生成那一刻的模式快照（回执口径按它算，见 generated 分支）
+  var BASE_BPM = null;   // 用户填的基础 BPM（替换模型识别值，第 14 条）
+
+  // ---- 标题栏 ----
+  // dbg 字段是给宿主日志用的：出问题时一眼能看出"这一下到底点在哪个元素上"，
+  // 不用再靠改代码加日志来猜（"点在按钮上却触发标题栏"这类就是这么抓的）。
+  function tbWho(e){
+    var t = e.target;
+    return "target=" + (t.id || t.className || t.tagName) + " btn=" + !!t.closest(".win-btns, .tb-btn");
+  }
+  $("titlebar").addEventListener("mousedown", function(e){ if(e.target.closest(".win-btns, .tb-btn")) return; post({type:"drag", dbg:tbWho(e)}); });
+  $("titlebar").addEventListener("dblclick", function(e){ if(e.target.closest(".win-btns, .tb-btn")) return; post({type:"winmaximize", dbg:tbWho(e)}); });
+  $("minBtn").addEventListener("click", function(){ post({type:"winminimize"}); });
+  $("maxBtn").addEventListener("click", function(){ post({type:"winmaximize"}); });
+  $("closeBtn").addEventListener("click", function(){ post({type:"close"}); });
+
+  // ---- 右键标题栏 = 系统原生菜单 ----
+  // 无边框窗口下 Windows 不会自己弹系统菜单（它根本不知道这里有标题栏），
+  // 所以由页面报一句"用户右键了"，宿主再调 TrackPopupMenu 弹出**系统那一份**
+  // —— 还原/移动/大小/最小化/最大化/关闭 全是系统菜单项，不是我们画的假菜单。
+  // 🔴 只接管「按钮/控件那一小块」：标题栏空白处属于拖动区，系统会自己弹它的菜单，
+  //    这里再弹一次就会同时出现两个菜单。按钮区是 no-drag（系统不接手），才需要我们补。
+  $("titlebar").addEventListener("contextmenu", function(e){
+    if (!e.target.closest(".win-btns, .tb-btn")) return;
+    e.preventDefault();
+    post({type:"sysmenu", dbg:tbWho(e)});
+  });
+
+  // ---- 窗口边缘缩放（页面自报）----
+  // ★ WebView2 铺满客户区 ⇒ 鼠标永远落在它的子窗口上 ⇒ 宿主收不到 WM_NCHITTEST，
+  //   无边框窗口的边缘拖不动。所以由页面判断「落点是否在窗口最外 6px」并通知宿主，
+  //   宿主再走系统原生缩放循环（ReleaseCapture + WM_NCLBUTTONDOWN）。
+  //   与顶栏拖窗口的 type:"drag" 是同一条路。工作台页里是同一份实现
+  //   （gui/workbench/__dsh_bridge.js），改一处记得同步那两处。
+  var RZ = 6, RZ_ZOOMED = false, RZ_ALLOW_TOP = false;  // 🔴 顶边不缩放：标题栏整片用于拖动，见 rzEdge 的 T
+  var RZ_CURSOR = { left:"ew-resize", right:"ew-resize", top:"ns-resize", bottom:"ns-resize",
+                    topleft:"nwse-resize", topright:"nesw-resize",
+                    bottomleft:"nesw-resize", bottomright:"nwse-resize" };
+  function rzOverScrollbar(x, y){
+    var e = document.elementFromPoint(x, y);
+    for (var i = 0; i < 6 && e && e.nodeType === 1; i++, e = e.parentElement) {
+      var r = e.getBoundingClientRect();
+      if (e.scrollHeight > e.clientHeight + 2 && x >= r.left + e.clientLeft + e.clientWidth) return true;
+      if (e.scrollWidth  > e.clientWidth  + 2 && y >= r.top  + e.clientTop  + e.clientHeight) return true;
+    }
+    return false;
+  }
+  function rzEdge(e){
+    if (!e || RZ_ZOOMED) return "";
+    var w = window.innerWidth, h = window.innerHeight;
+    var L = e.clientX <= RZ, R = e.clientX >= w - RZ;
+    var T = RZ_ALLOW_TOP && e.clientY <= RZ, B = e.clientY >= h - RZ;  // ★ 顶边关闭：标题栏只拖不放（与 C# ResizeBorderThickness 顶部=0 对齐）
+    if (!(L || R || T || B)) return "";
+    if ((L || R) && rzOverScrollbar(e.clientX, e.clientY)) return "";
+    if (L && T) return "topleft";
+    if (R && T) return "topright";
+    if (L && B) return "bottomleft";
+    if (R && B) return "bottomright";
+    if (L) return "left";
+    if (R) return "right";
+    if (T) return "top";
+    return "bottom";
+  }
+  document.addEventListener("mousedown", function(e){
+    if (e.button !== 0) return;
+    var edge = rzEdge(e);
+    if (!edge) return;
+    e.preventDefault(); e.stopPropagation();
+    post({type:"resize", edge:edge});
+  }, true);
+  document.addEventListener("mousemove", function(e){
+    var edge = rzEdge(e);
+    document.documentElement.style.cursor = edge ? RZ_CURSOR[edge] : "";
+  }, true);
+
+  // ---- 参数说明 / 关于（? 按钮）----
+  var IB_ABOUT = "参数说明 / 关于\n====================\n" +
+    "左侧是导航：生成谱面 / 工作台 / 分离试听 / 历史记录 / 设置 / 关于。\n" +
+    "「生成谱面」= 选音乐 → 选采点方式（MuScriptor 另需选精度）→ 生成 → 自动进工作台微调 / 导出。\n\n" +
+    "生成链路（两条采点方式）：\n" +
+    "  【OSN1 采点模型】默认，不吃精度档\n" +
+    "    ① ffmpeg 转 WAV（44.1k 立体声）\n" +
+    "    ② BS-RoFormer-SW 分离 6 轨\n" +
+    "    ③ OSN1 多轨采点（OnsetNet 6 音轨）\n" +
+    "    ④ 汇总多轨时间戳 JSON\n" +
+    "    ⑤ Adofai-Chart-Generator算法生成谱面（.adofai）\n" +
+    "  【MuScriptor 转谱】需选一档精度\n" +
+    "    ① ffmpeg 转 WAV（44.1k 立体声）\n" +
+    "    ② BS-RoFormer-SW 分离 6 轨\n" +
+    "    ③ 逐轨 MuScriptor 转谱\n" +
+    "    ④ 合并为单文件多轨 MIDI\n" +
+    "    ⑤ Adofai-Chart-Generator算法生成谱面（.adofai）\n\n" +
+    "精度档（仅 MuScriptor 用；只影响采音准确度，不影响玩法 / 特效）：\n" +
+    "  small ≈ 2GB 显存 · medium ≈ 4GB · large ≈ 12GB";
+  function showIbAbout(){ $("ibAboutBody").textContent = IB_ABOUT; $("ibModal").style.display = "flex"; }
+  function hideIbAbout(){ $("ibModal").style.display = "none"; }
+  $("ibAbout").addEventListener("click", showIbAbout);
+  $("ibAboutClose").addEventListener("click", hideIbAbout);
+  $("ibModal").addEventListener("click", function(e){ if(e.target === $("ibModal")) hideIbAbout(); });
+
+  // ---- 侧栏折叠开关（任务管理器式）----
+  // 默认折叠；点顶部汉堡在 #sidebar 上切 expanded。syncNavInd 的 MutationObserver
+  // 会盯到 class 变化自动重摆指示条，所以这里只管切 class，不用手动同步。
+  var navToggle = $("navToggle");
+  if (navToggle) {
+    navToggle.addEventListener("click", function(){
+      var sb = $("sidebar"); if (!sb) { return; }
+      sb.classList.toggle("expanded");
+    });
+  }
+
+  // ---- 侧边栏切换 ----
+  var pageClipTimer = null;
+  function showPage(page){
+    var old = document.querySelector("#main .page.active");
+    var pg = $("page-" + page);
+    /* ★ 2026-09-29 第四轮：旧页**快速渐隐**（不是空白、不是硬切、不是纸盖）。
+       挂 .leaving 跑 page-leave（opacity 1→0，.1s），与新页 fl-rise-in 的 100ms 延迟
+       **严格顺序**——旧页隐没那一刻新内容才开始浮，全程永不同显。
+       用独立 setTimeout 绑到该旧元素（非全局单例），快速连点也不会漏摘 .leaving。 */
+    if(old && old !== pg){
+      old.classList.remove("active","animating");
+      old.classList.add("leaving");
+      (function(el){ setTimeout(function(){ if(el){ el.classList.remove("leaving"); } }, 140); })(old);
+    }
+    if(pg){
+      /* ★ 2026-09-29 连点兜底：目标页可能正挂着上一轮的 .leaving（旧页渐隐定时器 140ms 内
+         又点回来）。不摘的话它会带着 .leaving（position:absolute + page-leave 渐隐）当上
+         active ⇒ 当前页自己淡成全透明，再等 140ms 定时器摘除才救回来（一段空白/闪烁）。
+         激活前先摘干净。 */
+      pg.classList.remove("leaving");
+      pg.classList.add("active");
+      /* ★ 2026-09-28：上浮动画期间把外框临时切成 overflow:hidden。
+         理由：内容要"下移 25vh 再升上来"，那一瞬间会把 .page 的滚动高度临时撑大
+         ⇒ 会闪出一条滚动条（连拇指一起），页面上像有道白杠划过去。
+         裁切只在动画这约 550ms 内有意义，动画走完就摘掉，正常滚动一点不受影响。
+         ⚠ 必须与 .page.active 上的 scrollbar-gutter:stable 配套：槽位常驻，
+           所以 auto↔hidden 来回切不会让内容宽度跳 12px（否则每次切页都要抖一下）。
+         ⚠ STEP_REDUCE 在下面才赋值，靠 var 提升仍可安全读取：系统关掉动画时
+           这里读到 undefined ⇒ !undefined 为真会挂上类，但那 .01ms 后就被摘掉，无副作用。 */
+      if(!STEP_REDUCE){
+        pg.classList.add("animating");
+        if(pageClipTimer){ clearTimeout(pageClipTimer); }
+        pageClipTimer = setTimeout(function(){
+          pageClipTimer = null;
+          document.querySelectorAll("#main .page.animating").forEach(function(p){ p.classList.remove("animating"); });
+        }, 620);
+      }
+    }
+    document.querySelectorAll("#sidebar .nav").forEach(function(n){
+      n.classList.toggle("active", n.getAttribute("data-page") === page);
+    });
+    if(page === "separate") loadProjects();
+    else if(page === "history") loadProjects();
+    if(page === "settings") post({type:"appinfo"});
+    if(page === "about"){ post({type:"appinfo"}); askHost("getexplain", null, restartTip("explainStatus")); }
+    if(page === "train") askHost("traininfo", null, restartTip("trainRefreshHint"));
+    if(page === "workbench") loadProjects();
+    /* ★ 2026-09-28：回到生成页时重摆一次 SelectorBar 的高亮块。
+       理由：页面 display:none 那段时间条目量不到宽度（offsetWidth=0），syncModeInd 会跳过；
+       切回来如果不补一次，高亮块可能停在"0 宽 / 旧位置"上。 */
+    if(page === "generate") syncModeInd();
+  }
+  document.querySelectorAll("#sidebar .nav").forEach(function(n){
+    n.addEventListener("click", function(){ showPage(n.getAttribute("data-page")); });
+  });
+
+  // ---- 步骤切换（生成页内部）----
+  /* ★ 2026-09-28 主人："并且用户选择了音乐后直接向左滑动进的第二个界面。"
+     + 同日第二轮："返回上一级时不应该往右滑吗，你怎么做的还是向左滑？"
+     ⇒ 动画**按方向**选（CSS 里四组 keyframes 一一对应）：
+          前进（n 比当前大）：旧 pane 挂 .leaving 向左淡出，新 pane 挂 .anim 自右 56px 滑入；
+          回退（n 比当前小）：旧 pane 挂 .leaving-back 向右淡出，新 pane 挂 .anim-back 自左滑入。
+       两段接力：先离场 160ms，到点再让新 pane 进场（display:none/block 抓不到 transition，
+       所以用 animation，与 CSS 那条注释同一个理由）。
+     ⚠ 顶部踏步条（.mini-step .stp）**立刻**更新、不等动画 —— 它是"进度指示"，
+       跟着动画一起延迟会被读成"点了没反应"。状态类挂在按钮上（不是圆点）：
+       文字颜色也要跟着变，而 CSS 没有父选择器。 */
+  var stepTimer = null;
+  var STEP_REDUCE = false;
+  try { STEP_REDUCE = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); } catch(_e){ /* 不支持就当没开 */ }
+  function clearPanes(){
+    document.querySelectorAll(".step-pane").forEach(function(p){
+      p.classList.remove("active","leaving","leaving-back","anim","anim-back");
+    });
+  }
+  function markSteps(n){
+    document.querySelectorAll(".mini-step .stp").forEach(function(b){
+      var sn = +b.getAttribute("data-s");
+      b.classList.remove("active","done");
+      if(sn < n){ b.classList.add("done"); } else if(sn === n){ b.classList.add("active"); }
+    });
+  }
+  function gotoStep(n){
+    markSteps(n);
+    var next = document.querySelector('.step-pane[data-pane="'+n+'"]');
+    /* 🔴🔴 第 3 步「生成」**没有对应 pane**。以前这里会一路走到 clearPanes()、把所有 pane
+       都摘掉 —— 那时生成进度是**全屏遮罩**，把空白盖住了所以看不出来。
+       2026-09-30 起进度改成**按钮下方延伸出来的内联面板**，而它就住在 pane 2 里 ⇒
+       摘掉 pane 2 等于把进度面板一起摘掉（点「开始生成」什么都不显示）。
+       ⇒ 没有对应 pane 的步骤只更新顶部踏步条，绝不动当前 pane。 */
+    if(!next){ return; }
+    var cur  = document.querySelector(".step-pane.active");
+    if(next === cur){ return; }                 // 已经在这一步（重复调用）⇒ 别重播动画
+    if(stepTimer){ clearTimeout(stepTimer); stepTimer = null; }
+    /* 兜底：系统里关掉了动画（或没有旧 pane）⇒ 直接落位。
+       ⚠ 这条分支必须留着，不能只靠 CSS 的 reduced-motion：那边把 animation-duration 压到 .01ms 后，
+         .leaving 会在**瞬间**跳到"淡出终态"（opacity:0）却仍占着 160ms 才被摘掉 ⇒
+         中间那 160ms 是一个空白页。 */
+    /* 方向只看"目标步 vs 当前步"的数字大小。⚠ 目标 pane 不存在时（第 3 步"生成"）
+       不该反过来当成"回退"⇒ 先算方向、再处理 next 为空的情况。 */
+    var back = !!(cur && next && (+n) < (+cur.getAttribute("data-pane")));
+    if(!cur || STEP_REDUCE){
+      clearPanes();
+      if(next){ next.classList.add("active"); }
+      /* ★ 2026-09-28：采点方式高亮块（#modeInd）是 JS 量的宽度 + 透明度的绝对定位元素。
+         它在**页面隐藏时量不到宽度**（offsetWidth=0，syncModeInd 会跳过），而以前只有
+         showPage("generate") / 字体就绪 / 整页 load 会去量 —— 那时第 2 步的 pane 还是
+         display:none ⇒ 第一次走到第 2 步时**高亮块始终没对齐**（选中项看着像没选中、
+         浅色档下选中项白字压在浅底上几乎看不见）。pane 真正可见后在这里补一次即可。 */
+      syncModeInd();
+      return;
+    }
+    cur.classList.add(back ? "leaving-back" : "leaving");
+    stepTimer = setTimeout(function(){
+      stepTimer = null;
+      clearPanes();
+      if(next){ next.classList.add("active", back ? "anim-back" : "anim"); }
+      syncModeInd();   // ★ 同上：等新 pane 落位（可见）后再对齐一次高亮块
+    }, 160);
+  }
+  /* 踏步条可点：点已走过的步骤回到那一步。
+     ⚠ 只有**存在对应 pane** 的步骤才能导航（1 / 2）。第 3 步"生成"在 HTML 里就是 disabled，
+     这里再判一次 pane 是否存在 —— 万一以后有人给"生成"补了 pane，这里自动就能点，不用改两处。 */
+  document.querySelectorAll(".mini-step .stp").forEach(function(b){
+    b.addEventListener("click", function(){
+      var n = +b.getAttribute("data-s");
+      if(!document.querySelector('.step-pane[data-pane="'+n+'"]')){ return; }
+      /* 回到第 1 步 = 要换歌 ⇒ 与原来「重新选择音乐」那个链接**完全同一套收尾**
+         （清掉精度选择 + 复位文案 + 重算生成按钮可用性），保证删掉那个链接后行为不变。 */
+      if(n === 1 && PRECISION){
+        PRECISION = "";
+        if($("precLabel")){ $("precLabel").textContent = "未选择"; }
+        document.querySelectorAll("#precisionGrid .pcard").forEach(function(x){ x.classList.remove("sel"); });
+        updateGenBtn();
+      }
+      gotoStep(n);
+    });
+  });
+
+  // ---- ① 选音乐 ----
+  var dz = $("dropzone");
+  dz.addEventListener("click", function(){ post({type:"pickfile", dest:"audio"}); });
+  ["dragover","dragenter"].forEach(function(ev){ dz.addEventListener(ev, function(e){ e.preventDefault(); dz.style.borderColor="var(--accent)"; }); });
+  ["dragleave","drop"].forEach(function(ev){ dz.addEventListener(ev, function(e){ e.preventDefault(); }); });
+  dz.addEventListener("drop", function(e){ e.preventDefault(); var f=(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); if(f){ setMusic(f.path || f.name); } });
+  function setMusic(p){
+    AUDIO_PATH = p || "";
+    if(AUDIO_PATH){
+      dz.classList.add("chosen");
+      $("dropBig").textContent = "已选择：" + AUDIO_PATH.split(/[\\/]/).pop();
+      $("dropSmall").textContent = AUDIO_PATH;
+      $("musicStatus").textContent = (GEN_MODE === "osn1")
+        ? "已选择，采点方式默认 OSN1，可直接生成"
+        : "已选择，接着选精度";
+      $("musicStatus").className = "status ok";
+      gotoStep(2);
+      updateGenBtn();
+    }
+  }
+
+  // ---- ② 选精度（仅 MuScriptor 需要；选 OSN1 时整块收起）----
+  document.querySelectorAll("#precisionGrid .pcard").forEach(function(c){
+    c.addEventListener("click", function(){
+      document.querySelectorAll("#precisionGrid .pcard").forEach(function(x){ x.classList.remove("sel"); });
+      c.classList.add("sel");
+      PRECISION = c.getAttribute("data-size");
+      $("precLabel").textContent = PRECISION.toUpperCase();
+      updateGenBtn();
+    });
+  });
+  /* ★ 2026-09-28：原来这里绑的是 #backToMusic（"重新选择音乐"链接）。
+     主人要求删掉那行字 ⇒ 元素与其监听器一起下线；它做的收尾（清精度 + 重算按钮）
+     已经搬进 mini-step 的点击处理里（点「1 选择音乐」时执行），行为不变。
+     ⚠ 别只删 HTML 留监听器：$("backToMusic") 会拿到 null，.addEventListener 直接抛异常，
+       后面整段初始化全部不执行（页面看着就是"点了没反应"）。 */
+
+  // ---- ②·5 采点方式（OSN1 默认 / MuScriptor）----
+  // 🔴 修掉两个坑：
+  //   ① OSN1 原先只是把三档「变灰不可点」，没真收起 ⇒ 看着像还能选；
+  //   ② 「开始生成」的可用性只在点精度卡时才刷新 ⇒ 选 OSN1 时必须先点一次
+  //      MuScriptor 精度、再切回 OSN1，按钮才亮。现在统一由 updateGenBtn() 算。
+  var MODE_TEXT = {
+    osn1: {
+      sub: "载入一首歌曲。生成时先做 BS-RoFormer-SW 六轨分离，再用 OSN1 采点模型对每条音轨分别踩点，汇总成时间戳交给Adofai-Chart-Generator算法出谱。",
+      chain: "① ffmpeg 转 WAV（44.1k 立体声）　② BS-RoFormer-SW 分离 6 轨<br>③ OSN1 多轨采点（OnsetNet 6 音轨）　④ 汇总多轨时间戳 JSON　⑤ Adofai-Chart-Generator算法生成谱面（.adofai）"
+    },
+    muscriptor: {
+      sub: "载入一首歌曲。生成时会先做 BS-RoFormer-SW 六轨分离，再对每条非人声轨分别转谱，最后合成 MIDI 交给Adofai-Chart-Generator算法出谱。",
+      chain: "① ffmpeg 转 WAV（44.1k 立体声）　② BS-RoFormer-SW 分离 6 轨<br>③ 逐轨 MuScriptor 转谱　④ 合并为单文件多轨 MIDI　⑤ Adofai-Chart-Generator算法生成谱面（.adofai）"
+    }
+  };
+  function updateGenBtn(){
+    // OSN1 不吃精度档 ⇒ 选好音乐即可生成；MuScriptor 必须先选一档精度
+    var needPrec = (GEN_MODE === "muscriptor");
+    $("genBtn").disabled = !(AUDIO_PATH && (!needPrec || PRECISION));
+  }
+  function setMode(m){
+    GEN_MODE = (m === "muscriptor") ? "muscriptor" : "osn1";   // 只认这两档，其余回退默认
+    /* ★ 2026-09-28：选中态从"JS 写内联 background:var(--accent)"改成 **aria-selected + CSS**。
+       内联那套有两个毛病：① 它不跟主题（浅色下仍是深色那支蓝）；② 切换是硬切、没有过渡。
+       现在配色由 .selbar .it[aria-selected="true"] 管，高亮块由 syncModeInd() 滑过去。 */
+    document.querySelectorAll("#modeMus,#modeOsn1").forEach(function(b){
+      b.setAttribute("aria-selected", (b.getAttribute("data-mode")===GEN_MODE) ? "true" : "false");
+    });
+    syncModeInd();
+    var isOsn1 = (GEN_MODE === "osn1");
+    $("precisionGrid").classList.toggle("folded", isOsn1);   // 真收起（折叠动效），不是变灰
+    $("step2Label").textContent = isOsn1 ? "选择采点方式" : "选择精度";
+    $("precLabel").textContent = isOsn1
+      ? "OSN1 直采（不用精度档）"
+      : (PRECISION ? PRECISION.toUpperCase() : "未选择");
+    if(MODE_TEXT[GEN_MODE]){
+      $("genSub").textContent = MODE_TEXT[GEN_MODE].sub;
+      $("genChain").innerHTML = MODE_TEXT[GEN_MODE].chain;
+    }
+    updateGenBtn();
+  }
+  /* 把 SelectorBar 那块高亮滑到当前选中的条目上（增量：只改 width/transform，CSS 负责过渡）。
+     🔴 本函数**必须能容忍"没有真 DOM"的环境**：tools/genmode_check.js 会把 setMode 连同它
+        一起抽出来、在最小 DOM 桩上 eval（那套桩专门用来防"看着对、点了才知道"的老坑回归）。
+        桩里没有 getElementById、元素也没有 offsetWidth，所以这里只用
+        document.querySelector + 数值保护：量不到就直接返回 ⇒ 桩环境下安全退出、绝不抛错。
+        也**不能引用 window**（Node 里没有）。需要挂监听的话放在 setMode 默认调用那一行之后。 */
+  function syncModeInd(){
+    var bar = document.querySelector("#modeBar");
+    var ind = document.querySelector("#modeInd");
+    var sel = document.querySelector('#modeBar .it[aria-selected="true"]');
+    if(!bar || !ind || !sel || !ind.style){ return; }
+    var w = sel.offsetWidth || 0;
+    if(!w){ return; }                       // 页面隐藏 / 字体未就绪 ⇒ 宽度是 0，等下次
+    ind.style.width = w + "px";
+    /* 指示器是 left:0 的绝对定位元素 ⇒ 它的原点 = 容器的 **padding box 左缘**，
+       而 offsetLeft 也是"相对容器 padding box 左缘" ⇒ 直接平移过去就对齐了，
+       不用再去补那 1px 边框（补了反而会整体偏 1px）。 */
+    ind.style.transform = "translateX(" + (sel.offsetLeft || 0) + "px)";
+    ind.style.opacity = "1";
+  }
+  document.querySelectorAll("#modeMus,#modeOsn1").forEach(function(b){
+    b.addEventListener("click", function(){ setMode(b.getAttribute("data-mode")); });
+  });
+  setMode("osn1");   // 默认 OSN1
+
+  // ★ 2026-09-28：Expander（展开/收起）开关 —— 「三种采点方式怎么选」
+  //   点 .exp-head 翻转 #pickHelp 的 .open，并同步 aria-expanded（无障碍）。
+  //   展开/收起的 0fr⇄1fr 高度补间 + chevron 旋转由 CSS 负责，这里只切状态类。
+  var ph = $("pickHelpHead");
+  if(ph){
+    ph.addEventListener("click", function(){
+      var exp = $("pickHelp");
+      if(!exp) return;
+      var open = exp.classList.toggle("open");
+      ph.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  }
+  // ★ 指示器初次定位：setMode("osn1") 在布局前跑，此时 offsetWidth 还是 0（字体未就绪 /
+  //   页面还 display:none），syncModeInd 会跳过；等字体 ready 或整页 load 后再对一次，
+  //   高亮块才能真正滑到 OSN1 条目上。
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(syncModeInd).catch(function(){});
+  }
+  window.addEventListener("load", syncModeInd);
+  /* ★ 2026-09-30 主人："点了开始生成后，按钮要灰色"。
+     生成期间按钮置灰（既表示"进行中"，也防连点重复发起）；按钮右边那个转圈同开同关。
+     收尾一律交回 updateGenBtn() —— "该不该可用"只有那一个判定口，别在别处写死 disabled。 */
+  function genBusy(on){
+    var s = $("genSpin");
+    if(s){ s.className = "gen-spin" + (on ? " on" : ""); }
+    if(on){ if($("genBtn")) $("genBtn").disabled = true; }
+    else { updateGenBtn(); }
+  }
+  // 收起后还得能再打开：转圈还在按钮右边转 ⇒ 点它就是"展开进度"
+  if($("genSpin")) $("genSpin").addEventListener("click", function(){
+    if(this.className.indexOf("on") >= 0){ $("overlay").classList.add("show"); }
+  });
+
+  $("genBtn").addEventListener("click", function(){
+    if(!AUDIO_PATH){ $("genStatus").textContent="请先选择音乐"; $("genStatus").className="status err"; return; }
+    if(GEN_MODE==="muscriptor" && !PRECISION){ $("genStatus").textContent="请先选择精度"; $("genStatus").className="status err"; return; }
+    var b = parseFloat($("baseBpm").value);
+    BASE_BPM = (isFinite(b) && b > 0) ? b : null;   // 空 / 非法 / ≤0 ⇒ 不覆盖
+    resetStages();
+    var tip = (GEN_MODE==="osn1")
+      ? "完整链路：BSR 分离 → OSN1 多轨采点 → 生成谱面"
+      : "完整链路：分离 6 轨 → 逐轨转谱 → 合并 → 生成谱面";
+    genBusy(true);                      // 按钮转灰 + 右边转圈开转（主人要求的那个状态）
+    showOverlay("正在处理…", tip);
+    gotoStep(3);
+    GEN_MODE_RUN = GEN_MODE;   // 快照：生成期间用户改模式，不影响这次回执的轨数口径
+    post({type:"generate", audio:AUDIO_PATH, size:(GEN_MODE==="osn1"?"medium":PRECISION), bpm:BASE_BPM, mode:GEN_MODE});
+  });
+
+  // ---- 宿主应答兜底 ----
+  // 新增的这几条消息（listmidis / setmaterial / getexplain / traininfo）都要宿主配合。
+  // 如果只刷新了页面而没重启程序，老宿主进程不认识它们 ⇒ 页面只会"空着/点了没反应"，
+  // 用户会当成界面坏了。所以凡是这类请求，等不到回应就明说「重启程序」。
+  var HOST_WAIT = {};
+  function askHost(type, msg, onTimeout, ms){
+    HOST_WAIT[type] = true;
+    var m = {}; for(var k in (msg||{})) m[k] = msg[k];
+    m.type = type;
+    post(m);
+    setTimeout(function(){ if(HOST_WAIT[type] && onTimeout) onTimeout(); }, ms || 2500);
+  }
+  function hostReplied(type){ HOST_WAIT[type] = false; }
+  var NEED_RESTART = "宿主没有回应这条请求。界面是新的，但程序还跑着旧版本 —— 关掉窗口重新双击「启动.bat」即可。";
+  function restartTip(id){
+    return function(){
+      var e = $(id);
+      if(e){ e.textContent = NEED_RESTART; e.className = "status err"; }
+    };
+  }
+
+  // ---- 工作台入口：先看有没有历史 MIDI（schedule 第 1 条）----
+  var MIDI_ITEMS = [], MIDI_SEL = null;
+  // ---- 工程列表统一口子（2026-09-27 修复）----
+  // 原先走 C# 宿主的 listmidis/liststems/listhistory，只认 .mid/.adofai/stems wav，
+  // OSN1 的 osn1_timestamps.json 进不了任何列表 → 工作台/历史全空。
+  // 现统一改从 chartgen 的 /api/projects 取数，三处渲染函数（renderMidis/renderStems/
+  // renderHistory）原样消费。
+  function loadProjects(){
+    fetch("/api/projects")
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if(!d || d.ok !== true){
+          projectsFail((d && d.error) ? String(d.error) : "后端未返回工程列表");
+          return;
+        }
+        renderMidis(d.midis || []);
+        renderStems(d.stems || []);
+        renderHistory(d.history || []);
+      })
+      .catch(function(e){ projectsFail("无法连接后端：" + e); });
+  }
+  function projectsFail(msg){
+    var we = $("wbEmptyText"), wi = $("wbInfo"), wc = $("wbEmptyCard"), ww = $("wbPickWrap");
+    if(we) we.textContent = "工程列表取得失败：" + msg;
+    if(wi){ wi.textContent = "工程列表取得失败：" + msg; wi.className = "status err"; }
+    if(wc) wc.style.display = "";
+    if(ww) ww.style.display = "none";
+    var sl = $("stemList"); if(sl) sl.innerHTML = '<div class="empty">工程列表取得失败：' + esc(msg) + '</div>';
+    var hl = $("histList"); if(hl) hl.innerHTML = '<div class="empty">工程列表取得失败：' + esc(msg) + '</div>';
+  }
+  function renderMidis(items){
+    hostReplied("listmidis");
+    MIDI_ITEMS = items || [];
+    MIDI_SEL = null;
+    var emptyCard = $("wbEmptyCard"), wrap = $("wbPickWrap"), box = $("midiList");
+    if(!MIDI_ITEMS.length){
+      // 无历史：明确告诉用户为什么进不去，不给「前往工作台」留活口
+      emptyCard.style.display = "";
+      wrap.style.display = "none";
+      $("openWbBtn").disabled = true;
+      // ★ 必须把文案写回来：如果刚才触发过"宿主没应答"的兜底提示，
+      //   那行红字会一直挂在这儿（探针当场抓到过这一条）。
+      $("wbEmptyText").textContent = "暂未对音乐采点或无历史记录，请生成后再试吧。";
+      $("wbInfo").textContent = "暂未对音乐采点或无历史记录，请生成后再试吧。";
+      $("wbInfo").className = "status";
+      return;
+    }
+    emptyCard.style.display = "none";
+    wrap.style.display = "";
+    $("openWbBtn").disabled = true;
+    $("wbInfo").textContent = "共 " + MIDI_ITEMS.length + " 条历史记录，请点选一条。";
+    $("wbInfo").className = "status";
+    box.innerHTML = "";
+    MIDI_ITEMS.forEach(function(it, i){
+      var row = document.createElement("div");
+      row.className = "item pick";
+      row.setAttribute("data-i", i);
+      var t = it.mtime ? new Date(it.mtime) : null;
+      var ts = t ? (t.getFullYear()+"-"+pad(t.getMonth()+1)+"-"+pad(t.getDate())+" "+pad(t.getHours())+":"+pad(t.getMinutes())) : "";
+      row.innerHTML = '<div class="tick"></div>'+
+        '<div class="meta"><div class="nm">'+esc(it.song || it.name)+'</div>'+
+        '<div class="sub">'+esc(it.name)+' · '+esc(it.size)+' · '+ts+
+        (it.audio ? ' · 音乐已就绪' : ' · 无整曲音乐')+'</div></div>'+
+        '<div class="acts"><span class="tag '+(it.has_chart?'ok':'no')+'">'+
+        (it.has_chart?'已出谱':'未出谱')+'</span></div>';
+      row.addEventListener("click", function(){ selectMidi(i); });
+      box.appendChild(row);
+    });
+  }
+  function selectMidi(i){
+    var it = MIDI_ITEMS[i]; if(!it) return;
+    MIDI_SEL = it;
+    document.querySelectorAll("#midiList .item").forEach(function(el){
+      el.classList.toggle("sel", +el.getAttribute("data-i") === i);
+    });
+    $("openWbBtn").disabled = false;
+    $("wbInfo").textContent = "已选：" + (it.song || it.name)
+      + (it.audio ? "（进工作台会自动载入这次用的音乐）" : "（这条没留下整曲音频，进去后手动选音源）");
+    $("wbInfo").className = "status ok";
+  }
+  $("openWbBtn").addEventListener("click", function(){
+    if(!MIDI_SEL){ return; }
+    var cur = document.querySelector("#main .page.active");
+    var go = function(){ post({type:"open_in_workbench", path: MIDI_SEL.path}); };
+    // ★ 2026-09-28：Win11 离场动画 —— 当前页向左滑出，再交给宿主导航进工作台，
+    //   视觉上就是"整页左滑进工作台"（离场侧）。reduced-motion 下直接走、不播动画。
+    if(cur && !STEP_REDUCE){
+      cur.classList.add("leaving-left");
+      setTimeout(go, 200);
+    } else {
+      go();
+    }
+  });
+  $("wbGoGen").addEventListener("click", function(){ showPage("generate"); });
+
+  // ---- 分离试听 ----
+  function loadStems(){ loadProjects(); }
+  function renderStems(jobs){
+    var box = $("stemList"); if(!box) return;
+    if(!jobs || !jobs.length){ box.innerHTML = '<div class="empty">还没有分离产物。<br>先到「生成谱面」生成一次。</div>'; return; }
+    box.innerHTML = "";
+    // ★ 2026-09-26 改多 job：C# 壳 Stems() 现在返回全部含 stems/ 的目录，
+    //   每首歌一个折叠项（.stem-group），默认折叠，点击歌名展开该曲各音轨。
+    jobs.forEach(function(g){
+      if(!g || !g.items || !g.items.length) return;
+      var gEl = document.createElement("div");
+      gEl.className = "stem-group";   // 默认折叠（无 .open）
+      var head = document.createElement("div");
+      head.className = "stem-head";
+      var gname = g.song || "分离产物";
+      head.innerHTML = '<svg class="chev" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 5l6 5-6 5"/></svg>'+
+        '<div style="flex:1;min-width:0"><div class="hn">'+esc(gname)+'</div>'+
+        (g.job ? '<div class="hsub">'+esc(g.job)+'</div>' : '')+'</div>'+
+        '<div class="cnt">'+g.items.length+' 条音轨</div>';
+      var body = document.createElement("div");
+      body.className = "stem-body";
+      var inner = document.createElement("div");
+      inner.className = "stem-inner";
+      g.items.forEach(function(s){
+        var row = document.createElement("div");
+        row.className = "stem-row";
+        var url = "/media_local?path=" + encodeURIComponent(s.path);
+        row.innerHTML = '<div class="nm">'+esc(s.name)+'</div>'+
+          '<div class="sub">'+esc(s.path)+'</div>'+
+          '<audio controls preload="none" src="'+url+'"></audio>';
+        inner.appendChild(row);
+      });
+      body.appendChild(inner);
+      head.addEventListener("click", function(){ gEl.classList.toggle("open"); });
+      gEl.appendChild(head); gEl.appendChild(body);
+      box.appendChild(gEl);
+    });
+  }
+
+
+  // ---- 历史记录 ----
+  function renderHistory(items){
+    var box = $("histList"); if(!box) return;
+    if(!items || !items.length){ box.innerHTML = '<div class="empty">还没有生成的谱面。先到「生成谱面」生成一次。</div>'; return; }
+    box.innerHTML = "";
+    items.forEach(function(it){
+      var row = document.createElement("div");
+      row.className = "item";
+      var t = it.mtime ? new Date(it.mtime) : null;
+      var ts = t ? (t.getFullYear()+"-"+pad(t.getMonth()+1)+"-"+pad(t.getDate())+" "+pad(t.getHours())+":"+pad(t.getMinutes())) : "";
+      row.innerHTML = '<div class="meta"><div class="nm">'+esc(it.name)+'</div>'+
+        '<div class="sub">'+it.size+' · '+ts+' · '+esc(it.source_dir)+'</div></div>'+
+        '<div class="acts">'+
+        '<button class="btn" data-act="dir">打开目录</button>'+
+        '<button class="btn" data-act="wb">工作台打开</button>'+
+        '</div>';
+      row.querySelector('[data-act="dir"]').addEventListener("click", function(){ post({type:"openfolder", folder:it.source_dir}); });
+      row.querySelector('[data-act="wb"]').addEventListener("click", function(){ post({type:"open_in_workbench", path: it.source_midi || ""}); });
+      box.appendChild(row);
+    });
+  }
+  function pad(n){ return (n<10?"0":"")+n; }
+
+  // ---- Markdown 渲染（零依赖：关于页 explain.md，schedule 第 3 条）----
+  // 只做我们真正会用到的子集：标题 / 粗斜体 / 行内码 / 代码块 / 列表 / 引用 / 分隔线 /
+  // 链接 / 图片 / 表格。先转义再解析，避免 md 正文里的 <> 变成可执行标签。
+  function mdInline(s){
+    // ★ 必须先转义再解析：explain.md 是普通文本文件，里面写 `<img onerror=...>` 是常事
+    //   （也可能是有心之人的投毒）。不转义就直接拼进 innerHTML = 在自己窗口里执行任意脚本。
+    //   转义只会动 & < > "，不会碰 markdown 的 * [ ] ( ) 这些记号，所以顺序不影响解析。
+    //   （这条是被 importprobe 里那条 XSS 断言当场抓出来的，别再改回去。）
+    s = esc(s);
+    return s
+      .replace(/`([^`]+)`/g, function(_m, c){ return "<code>"+c+"</code>"; })
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[^*])\*([^*]+)\*/g, function(_m, a, c){ return a+"<i>"+c+"</i>"; })
+      .replace(/!\[([^\]]*)\]\(([^)\s]+)\)/g, '<img alt="$1" src="$2">')
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+  }
+  function mdToHtml(src){
+    var lines = String(src == null ? "" : src).replace(/\r\n?/g, "\n").split("\n");
+    var out = [], i = 0, para = [], listMode = "", tableMode = false, tHead = false;
+    function flushPara(){
+      if(para.length){ out.push("<p>" + mdInline(para.join("<br>")) + "</p>"); para = []; }
+    }
+    function closeList(){ if(listMode){ out.push("</"+listMode+">"); listMode = ""; } }
+    function closeTable(){ if(tableMode){ out.push("</table>"); tableMode = false; tHead = false; } }
+    function closeAll(){ flushPara(); closeList(); closeTable(); }
+    function cells(row){
+      return row.replace(/^\s*\|/, "").replace(/\|\s*$/, "").split("|")
+        .map(function(c){ return mdInline(c.trim()); });
+    }
+    for(; i < lines.length; i++){
+      var ln = lines[i];
+      var fence = /^\s*```/.exec(ln);
+      if(fence){
+        closeAll();
+        var buf = [];
+        for(i++; i < lines.length && !/^\s*```/.test(lines[i]); i++) buf.push(lines[i]);
+        out.push("<pre><code>" + esc(buf.join("\n")) + "</code></pre>");
+        continue;
+      }
+      if(/^\s*$/.test(ln)){ closeAll(); continue; }
+      var h = /^(#{1,6})\s+(.*)$/.exec(ln);
+      if(h){ closeAll(); var n = h[1].length; out.push("<h"+n+">"+mdInline(h[2].trim())+"</h"+n+">"); continue; }
+      if(/^\s*([-*_])\s*\1\s*\1[\s\S]*$/.test(ln) && /^\s*([-*_])(\s*\1){2,}\s*$/.test(ln)){
+        closeAll(); out.push("<hr>"); continue;
+      }
+      if(/^\s*>/.test(ln)){
+        closeAll();
+        var qb = [];
+        for(; i < lines.length && /^\s*>/.test(lines[i]); i++) qb.push(lines[i].replace(/^\s*>\s?/, ""));
+        i--;
+        out.push("<blockquote>" + mdInline(qb.join("<br>")) + "</blockquote>");
+        continue;
+      }
+      // 表格：|---| 分隔行决定它是表格
+      if(/\|/.test(ln) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i+1]) && /-/.test(lines[i+1])){
+        closeAll(); tableMode = true; tHead = true;
+        out.push("<table><thead><tr>");
+        cells(ln).forEach(function(c){ out.push("<th>"+c+"</th>"); });
+        out.push("</tr></thead><tbody>");
+        i += 2;
+        for(; i < lines.length && /\|/.test(lines[i]) && !/^\s*$/.test(lines[i]); i++){
+          out.push("<tr>");
+          cells(lines[i]).forEach(function(c){ out.push("<td>"+c+"</td>"); });
+          out.push("</tr>");
+        }
+        i--;
+        out.push("</tbody></table>"); tableMode = false;
+        continue;
+      }
+      var ul = /^\s*[-*+]\s+(.*)$/.exec(ln);
+      var ol = /^\s*\d+[.)]\s+(.*)$/.exec(ln);
+      if(ul || ol){
+        flushPara(); closeTable();
+        var want = ul ? "ul" : "ol";
+        if(listMode !== want){ closeList(); out.push("<"+want+">"); listMode = want; }
+        out.push("<li>" + mdInline((ul || ol)[1]) + "</li>");
+        continue;
+      }
+      closeList(); closeTable();
+      para.push(ln);
+    }
+    closeAll();
+    return out.join("");
+  }
+
+  // ---- 关于页：explain.md（第 3 条）----
+  var EXPLAIN_PATH = "";
+  function renderExplain(d){
+    // 🔴 这里必须用**请求名** "getexplain"，不是回包里的 d.type（"explain"）——
+    //    HOST_WAIT 的 key 是在 askHost(type,...) 里按请求名登记的（第 969 行发的就是 getexplain）。
+    //    写错成 "explain" 的后果：那个 key 永远清不掉，于是**打开「关于」页 2.5 秒后必然刷出一条红字**
+    //    "宿主没有回应这条请求。界面是新的，但程序还跑着旧版本" —— 明明 Markdown 已经渲染出来了，
+    //    纯属误报（主人 2026-09-22 拿截图问"这红字是啥意思？"就是这个）。
+    hostReplied("getexplain");
+    var box = $("aboutMd"), miss = $("explainMissing");
+    if(!d){ box.innerHTML = '<div class="empty">读取失败。</div>'; return; }
+    EXPLAIN_PATH = d.path || (d.candidates && d.candidates[0]) || "";
+    // ★ 2026-09-26 主人裁定：正常态**不再把路径显示在界面上**（那一行已被删）。
+    //   EXPLAIN_PATH 仍要算出来 —— 只有「缺件」态要告诉用户把文件放哪儿，探针也靠它断言。
+    if(d.ok){
+      miss.style.display = "none";
+      box.innerHTML = mdToHtml(d.text || "");
+      $("explainStatus").textContent = "已载入。";
+      $("explainStatus").className = "status ok";
+    } else {
+      miss.style.display = "";
+      box.innerHTML = '<div class="empty">还没有 <b>explain.md</b>。<br>'
+        + '把它放到这个路径就能自动读出来：<br><span style="color:var(--text)">'
+        + esc(EXPLAIN_PATH) + '</span><br>（也可以直接点下面的按钮生成一份模板）</div>';
+      $("explainStatus").textContent = "";
+      $("explainStatus").className = "status";
+    }
+  }
+  $("mkExplainBtn").addEventListener("click", function(){
+    $("explainStatus").textContent = "正在写入模板…";
+    post({type:"mkexplain", path: EXPLAIN_PATH});
+  });
+  $("openExplainDir").addEventListener("click", function(){
+    post({type:"openfolder", folder: EXPLAIN_PATH.replace(/[\\/][^\\/]*$/, "")});
+  });
+
+  // ---- 设置页：界面材质三档（第 2 条）----
+  // ★ 2026-09-21 主人裁定：删掉「透明」档，剩亚克力 / 云母 / 实色。
+  //   档位清单由宿主发过来（appinfo.materials）⇒ 这里只维护**说明文字**，
+  //   不再靠 name 分支判预览色 —— 加档减档都只动 MAT_DESC 一处。
+  var MATERIAL = "", MAT_LIST = [];
+  // ★ 2026-09-22 加「标签页」（Win11 22H2 的 Tabbed 材质，资源管理器带标签页那种）。
+  //   档位清单由宿主发过来，说明文字只在这里维护一份 ⇒ 加档减档都不用再改卡片渲染。
+  // ★ 2026-09-22 主人再要求（第二十三轮）：**档位名全英文**（Acrylic / Mica / Tabbed / Solid），
+  //   中文名他说"太土"。名字在宿主那边（Materials.cs / gui_main.py 的 label），这里只管说明。
+  //   🔴 说明**保持中文**（他这轮只点"关键字"要英文），但里面**引用到别的档位名时必须用英文名**，
+  //      否则一屏里中英两套名字打架。tabbed 那条原来写"标签页同款"——那个中文名已经废了，
+  //      改说"资源管理器同款"（Tabbed 就是 Explorer 标签页那款材质），不提旧名。
+  //   ⚠ 改这里的文案，`app-cs/tools/_whichbuild.py` 的负标记不受影响（它只看 DLL，前端不进 IL）。
+  var MAT_DESC = {
+    acrylic:"磨砂玻璃 · 透出底下的光",
+    mica:"桌面纹理 · 安静沉稳",
+    tabbed:"资源管理器同款 · 比 Mica 更沉一点",
+    solid:"不透明 · 界面更纯净"
+  };
+
+  // ---- 深色 / 浅色（2026-09-22 新增，同日改过一次形态）----
+  // ★ 第一版是"挂在云母/实色卡片里、选中那张卡才跳出来"；主人看过截图否了，
+  //   改成**材质格下面另起一行的全局开关**。他给的理由本身就说明了归属：
+  //   "亚克力也有白色版本" ⇒ 明暗跟"选哪档材质"无关，它是全局外观。
+  //   ⇒ 一并删掉了 MaterialSpec.DarkLight 与 materials[].appearances。
+  // 明暗是**全局**的（挂在 <html data-theme> 上），不是每档材质各存一份 ——
+  // 所以从浅色切到亚克力不会把界面突然掰回深色。
+  // 初值从 DOM 属性读：宿主会随文档注入脚本，在页面脚本之前就把 data-theme 设好
+  // （防"浅底配浅字"的第一帧闪烁，见 MainWindow.ThemeInjectJs）。
+  var APPEARANCE = (function(){
+    try{ return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark"; }
+    catch(e){ return "dark"; }
+  })();
+  var APPEAR_META = { dark:{name:"dark",label:"深色"}, light:{name:"light",label:"浅色",base_hex:"#F3F3F3"} };
+  var APPEAR_DESC = { dark:"深色：窗口偏暗，夜里看不刺眼", light:"浅色：白天 / 亮环境更清楚" };
+
+  function curTheme(){
+    return document.documentElement.getAttribute("data-theme") === "light" ? "light" : "dark";
+  }
+  /* 应用明暗。宿主也会把同一个值写进 localStorage，
+     这样下一次导航（含进工作台）的首帧就摆正了 —— 两处写的是同一个键。 */
+  function applyTheme(name){
+    if(name !== "light" && name !== "dark"){ name = "dark"; }
+    var changed = (APPEARANCE !== name) || (curTheme() !== name);
+    APPEARANCE = name;
+    document.documentElement.setAttribute("data-theme", name);
+    try{ localStorage.setItem("dsh.appearance", name); }catch(e){ /* 读不到就算了 */ }
+    if(changed){ renderAppearance(); }
+  }
+  function setAppearance(name){
+    if(name === APPEARANCE && curTheme() === name){ return; }
+    // 先本地生效（不等宿主回话），再过场 —— 与材质那套同款：
+    // 幕布快暗盖住整片配色+窗口底色的瞬间跳变，宿主回信后缓缓亮起。
+    applyTheme(name);
+    var meta = APPEAR_META[name] || {};
+    $("matStatus").textContent = "已切换为「" + (meta.label || name) + "」外观。";
+    $("matStatus").className = "status ok";
+    ShellUI.MatFade.run(function(){ post({type:"setappearance", name: name}); });
+  }
+
+  /* 画「深浅外观」那个下拉。★ 2026-09-22 起由**它自己**渲染 ——
+     原来挂在材质卡里（选中那张才展开），现在挪到材质格下面另起一行、始终可见。
+     ★ 第三轮：原生 <select> → 自绘 ComboBox（ShellUI.Dropdown）。
+       选项只 setOptions 一次，之后只同步选中值 —— 重复 setOptions 会把"当前行"重置。 */
+  var APPEAR_DD = null;
+  function renderAppearance(){
+    if(!$("appearSelect")) return;
+    if(!APPEAR_DD && window.ShellUI && ShellUI.Dropdown){
+      APPEAR_DD = ShellUI.Dropdown.create({
+        mount: $("appearSelect"),
+        id: "appearSelect",
+        onChange: function(n){ setAppearance(n); }
+      });
+      if(APPEAR_DD){
+        APPEAR_DD.setOptions(Object.keys(APPEAR_META).map(function(n){
+          // Win11 的浮出菜单是**纯文字**（主人的参考图：禁用 / Windows 电源模式 / 电源计划）
+          // ⇒ 这里不给 hint；说明文字仍旧只出现在左边那一行 #appearDesc。
+          return { value:n, label:(APPEAR_META[n] || {}).label || n };
+        }));
+      }
+    }
+    if(APPEAR_DD){ APPEAR_DD.setValue(APPEARANCE); }
+    var d = $("appearDesc");
+    if(d){ d.textContent = APPEAR_DESC[APPEARANCE] || ""; }
+  }
+
+  var MAT_DD = null, MAT_SIG = "";
+  function renderMaterials(cur, list){
+    if(list && list.length) MAT_LIST = list;
+    if(cur) MATERIAL = cur;
+    if(!$("matSelect")) return;
+    if(!MAT_DD && window.ShellUI && ShellUI.Dropdown){
+      MAT_DD = ShellUI.Dropdown.create({
+        mount: $("matSelect"),
+        id: "matSelect",
+        onChange: function(name){
+          // 先本地亮起来，不等宿主回话。
+          // 🔴 之前只发消息、纯等宿主的 material 回发来刷 UI，回发一旦丢一条，
+          //    高亮就永远停在上一档 —— 表现为"我明明点了亚克力，界面显示的还是云母"。
+          onMaterialChanged(name);
+          // ★ 过场动画：幕布先快暗（把 DWM 材质的瞬间跳变盖住），90ms 后才真的发切换，
+          //   宿主回信时再缓缓亮起 —— 观感是柔和的渐变而不是硬切。
+          ShellUI.MatFade.run(function(){ post({type:"setmaterial", name: name}); });
+        }
+      });
+    }
+    if(!MAT_DD) return;
+    // ⚠ 只在**档位清单变了**的时候 setOptions（宿主发 materials 那条会加减档）；
+    //   其余情况只同步选中值 —— 每次重建会把展开态/当前行一起清掉。
+    var sig = MAT_LIST.map(function(m){ return m.name; }).join("|");
+    if(sig !== MAT_SIG){
+      MAT_SIG = sig;
+      MAT_DD.setOptions(MAT_LIST.map(function(m){
+        return { value:m.name, label:(m.label || m.name), hint: MAT_DESC[m.name] || "" };
+      }));
+    }
+    MAT_DD.setValue(MATERIAL);
+  }
+  function onMaterialChanged(name){
+    MATERIAL = name;
+    try { localStorage.setItem('dsh.material', name); } catch (e) {}
+    document.documentElement.setAttribute('data-material', name);
+
+    renderMaterials();
+    $("matStatus").textContent = "已切换为「"
+      + ((MAT_LIST.filter(function(m){ return m.name === name; })[0] || {}).label || name)
+      + "」。";
+    $("matStatus").className = "status ok";
+  }
+
+  // ---- 训练采点模型页（第 9 条）----
+  function renderTrain(d){
+    hostReplied("traininfo");
+    var _hint = $("trainRefreshHint"); if(_hint){ _hint.textContent = ""; _hint.className = "status"; }
+    var box = $("trainCard"); if(!box || !d) return;
+    var g = d.gpu || {};
+    function row(k, v, cls){
+      return '<div class="kv"><div class="k">'+k+'</div><div class="v"'
+        + (cls ? ' style="color:'+cls+'"' : '') + '>'+v+'</div></div>';
+    }
+    var html = "";
+    html += row("训练脚本", d.script_ok
+      ? esc(d.script)
+      : '<span style="color:var(--warn)">未找到</span> —— 这个版本的仓库里还没有训练代码',
+      d.script_ok ? "" : "");
+    html += row("显卡", g.ok
+      ? esc(g.name) + "（" + esc(g.vram) + "）"
+      : '<span style="color:var(--warn)">没有检测到 NVIDIA 显卡</span>');
+    html += row("已有权重", (d.weights && d.weights.length)
+      ? d.weights.length + " 个（内置默认模型）" : "0 个");
+    html += row("数据集目录", d.data_dir ? esc(d.data_dir) : '<span style="color:var(--warn)">未找到</span>');
+    html += row("音频样本", (d.audio_count || 0) + " 个");
+    html += row("Python", esc(d.py || ""));
+    box.innerHTML = html;
+    var extra = document.createElement("div");
+    extra.className = "note" + (d.script_ok ? "" : " blue");
+    extra.style.marginTop = "12px";
+    extra.innerHTML = d.script_ok
+      ? '训练脚本已就位。<b>启动由你亲自拍板</b> —— 训练一旦跑起来会长时间占满显卡，请留在电脑前盯着。'
+      : '本页的入口已经留好，但<b>当前仓库里没有训练代码</b>（采点模型 osn1 的训练脚本不在 <code>gui/</code> / <code>audio-sep/</code> 下）。'
+        + '把训练脚本放到：<br><span style="color:var(--text)">' + esc((d.script_candidates||[])[0] || "") + '</span><br>'
+        + '放进来之后本页会自动点亮，不需要再改代码。';
+    box.appendChild(extra);
+    var btnRow = document.createElement("div");
+    btnRow.className = "row";
+    btnRow.style.margin = "14px 0 0";
+    btnRow.innerHTML = '<div class="ctl"><button class="btn" id="trainRefresh">重新体检</button></div>';
+    box.appendChild(btnRow);
+    $("trainRefresh").addEventListener("click", function(){ post({type:"traininfo"}); });
+    // ⚠ 这里**故意不放**「开始训练」按钮：本项目当前没有训练脚本，放个按不动的假按钮
+    //   只会误导；等脚本真就位、启动参数定下来再一起做。训练也绝不由界面自动拉起。
+  }
+
+  // ---- 设置 / 关于 ----
+  function renderAppInfo(d){
+    if(!d) return;
+    window.__OUTPUT__ = d.output_dir || "";
+    var sc = $("settingsCard"); if(sc){
+      sc.innerHTML = '<div class="kv"><div class="k">项目目录</div><div class="v">'+esc(d.studio_dir||"")+'</div></div>'+
+        '<div class="kv"><div class="k">输出目录</div><div class="v">'+esc(d.output_dir||"")+'</div></div>'+
+        '<div class="kv"><div class="k">音源分离</div><div class="v">'+esc(d.audio_sep_dir||"")+'</div></div>'+
+        '<div class="kv"><div class="k">谱面引擎</div><div class="v">'+esc(d.chartgen_dir||"")+'</div></div>'+
+        '<div class="kv"><div class="k">网关 / 引擎</div><div class="v">'+esc(d.gateway||"")+' · '+esc(d.sidecar||"")+'</div></div>'+
+        '<div class="kv"><div class="k">Python</div><div class="v">'+esc(d.py_ver||"")+'</div></div>';
+    }
+    var ac = $("aboutCard"); if(ac){
+      ac.innerHTML = '<div class="kv"><div class="k">应用</div><div class="v">'+esc(d.app||"ADOFAI Studio")+'</div></div>'+
+        '<div class="kv"><div class="k">项目目录</div><div class="v">'+esc(d.studio_dir||"")+'</div></div>'+
+        '<div class="kv"><div class="k">网关地址</div><div class="v">'+esc(d.gateway||"")+'</div></div>'+
+        '<div class="kv"><div class="k">引擎端口</div><div class="v">'+esc(d.sidecar||"")+'</div></div>';
+    }
+    // schedule 第 2 条：设置页的界面材质卡（当前值 + 可选项都由宿主给）
+    if(d.appearances && d.appearances.length){
+      d.appearances.forEach(function(a){ if(a && a.name){ APPEAR_META[a.name] = a; } });
+    }
+    if(d.appearance) applyTheme(d.appearance);
+    // ⚠ 无条件重画一次：applyTheme 只在"真的变了"时刷 UI，
+    //   而这次进来的可能只是文案/清单更新（label 从宿主来）。重画是幂等的。
+    renderAppearance();
+    if(d.materials && d.materials.length) renderMaterials(d.material, d.materials);
+  }
+  $("openOutBtn").addEventListener("click", function(){ post({type:"openfolder", folder: window.__OUTPUT__ || ""}); });
+  $("cleanBtn").addEventListener("click", function(){
+    $("cleanStatus").textContent = "清理中…";
+    post({type:"cleanwork"});
+  });
+
+  function esc(s){ return String(s==null?"":s).replace(/[&<>"]/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]; }); }
+
+  // ---- 遮罩 ----
+  function showOverlay(text, sub){
+    $("overlay").classList.remove("error"); $("overlay").classList.remove("done");
+    $("overlayText").textContent=text||"";
+    $("overlaySub").textContent=sub||"";
+    $("overlay").classList.add("show");
+  }
+  function hideOverlay(){ clockStop(); $("overlay").classList.remove("show"); $("overlay").classList.remove("error"); $("overlay").classList.remove("done"); }
+  $("overlayClose").addEventListener("click", function(){ hideOverlay(); });
+
+  // ---- 生成阶段进度 + 引擎实时日志 ----
+  var GEN_T0 = 0, GEN_TICK = null, LAST_MSG = 0;
+  var LOG_BUF = [], LOG_TIMER = null, LOG_MAX = 600;
+  function clockStart(){
+    GEN_T0 = Date.now(); LAST_MSG = Date.now();
+    if(GEN_TICK) clearInterval(GEN_TICK);
+    GEN_TICK = setInterval(clockTick, 1000);
+    clockTick();
+  }
+  function clockTick(){
+    if(!GEN_T0) return;
+    var el = $("overlayTimer"); if(!el) return;
+    var s = Math.floor((Date.now()-GEN_T0)/1000);
+    var pad = function(v){ return (v<10?"0":"")+v; };
+    var gap = Math.floor((Date.now()-LAST_MSG)/1000);
+    el.textContent = "已运行 " + pad(Math.floor(s/60)) + ":" + pad(s%60)
+                   + "　·　最近输出 " + gap + " 秒前"
+                   + (gap>=45 ? "（引擎静默中，正在做 GPU 重活，属正常）" : "");
+  }
+  function clockStop(){ if(GEN_TICK){ clearInterval(GEN_TICK); GEN_TICK=null; } GEN_T0=0; }
+
+  // 阶段名随采点方式走：OSN1 通路是「分离 → 多轨采点 → 汇总时间戳」，
+  // 不经过 MuScriptor 逐轨转谱 / 合并 MIDI，原先前端写死成 MuScriptor 的 5 步
+  // ⇒ 选 OSN1 也显示"逐轨 MuScriptor 转谱"，与实际跑的链路不符。
+  var STAGE_DEFS = {
+    osn1: [
+      "① 转 WAV（ffmpeg 44.1kHz 立体声）",
+      "② BS-RoFormer-SW 分离 6 轨",
+      "③ OSN1 多轨采点（OnsetNet 6 音轨）",
+      "④ 汇总多轨时间戳 JSON",
+      "⑤ Adofai-Chart-Generator算法生成谱面"
+    ],
+    muscriptor: [
+      "① 转 WAV（ffmpeg 44.1kHz 立体声）",
+      "② BS-RoFormer-SW 分离 6 轨",
+      "③ 逐轨 MuScriptor 转谱",
+      "④ 合并为单文件多轨 MIDI",
+      "⑤ Adofai-Chart-Generator算法生成谱面"
+    ]
+  };
+  function buildStageList(){
+    var defs = STAGE_DEFS[GEN_MODE] || STAGE_DEFS.osn1;
+    var box = $("stageList");
+    if(!box) return;
+    box.innerHTML = defs.map(function(t, i){
+      return '<div class="st" data-st="' + (i+1) + '"><div class="dot"></div><div>'
+           + t + ' <span class="det"></span></div></div>';
+    }).join("");
+  }
+  function resetStages(){
+    buildStageList();   // 先按当前采点方式重建阶段名，再清状态
+    document.querySelectorAll("#stageList .st").forEach(function(el){ el.classList.remove("run","ok","err"); });
+    $("genLog").innerHTML = "";
+    LOG_BUF = [];
+    $("overlayTimer").textContent = "";
+    clockStart();
+  }
+  function markStage(n, name, detail){
+    LAST_MSG = Date.now();
+    if(!n || n<1 || n>5) return;
+    document.querySelectorAll("#stageList .st").forEach(function(el){
+      var s = +el.getAttribute("data-st");
+      if(s < n){ el.classList.remove("run","err"); el.classList.add("ok"); }
+      else if(s === n){ el.classList.remove("ok","err"); el.classList.add("run"); }
+      else { el.classList.remove("run","ok","err"); }
+    });
+    // detail 写进「当前这一步」自己的 .det，不再只认第 3 步（OSN1 的 detail 在第 2 步）
+    if(detail){
+      var cur = document.querySelector('#stageList .st[data-st="' + n + '"] .det');
+      if(cur) cur.textContent = "— " + detail;
+    }
+    if(name) $("overlayText").textContent = name;
+  }
+  function finishStages(){
+    document.querySelectorAll("#stageList .st").forEach(function(el){ el.classList.remove("run","err"); el.classList.add("ok"); });
+    clockStop();
+  }
+  // 「生成完成（N/M …）」的文案。抽成独立函数是为了能被 genmode_check.js 直接测。
+  // 分母必须跟着**这次生成**的模式走：OSN1 = 6 轨各自踩点，MuScriptor = 5 条非人声轨转谱。
+  // 写死 "/5 条轨转谱成功" 会让 OSN1 显示成「6/5 条轨转谱成功」（真机截图里见过）。
+  function genDoneText(stems, failed){
+    var isOsn1Run = (GEN_MODE_RUN === "osn1");
+    var f = failed || [];
+    return "生成完成（" + (stems||0) + "/" + (isOsn1Run ? 6 : 5)
+      + (isOsn1Run ? " 条轨踩点" : " 条轨转谱成功")
+      + (f.length ? "，失败：" + f.join("、") : "") + "）";
+  }
+  function appendGenLog(line){
+    if(!line) return;
+    LAST_MSG = Date.now();
+    LOG_BUF.push(line);
+    if(LOG_BUF.length > 4000) LOG_BUF.splice(0, LOG_BUF.length-4000);
+    if(!LOG_TIMER) LOG_TIMER = setTimeout(flushGenLog, 120);
+  }
+  function flushGenLog(){
+    LOG_TIMER = null;
+    var box = $("genLog"); if(!box) return;
+    if(!LOG_BUF.length) return;
+    var atBottom = (box.scrollTop + box.clientHeight) >= (box.scrollHeight - 40);
+    var frag = document.createDocumentFragment();
+    LOG_BUF.forEach(function(line){
+      var d = document.createElement("div");
+      if(/^\[err\]/.test(line)) d.className = "l-err";
+      else if(/^\[ok\]/.test(line)) d.className = "l-ok";
+      else if(/^\[warn\]/.test(line)) d.className = "l-warn";
+      d.textContent = line;
+      frag.appendChild(d);
+    });
+    LOG_BUF = [];
+    box.appendChild(frag);
+    while(box.childNodes.length > LOG_MAX) box.removeChild(box.firstChild);
+    if(atBottom) box.scrollTop = box.scrollHeight;
+  }
+  function failOverlay(msg, detail){
+    clockStop();
+    genBusy(false);   // 失败 ⇒ 按钮交回可用态，别把用户卡在灰按钮上
+    $("overlay").classList.remove("done");
+    $("overlay").classList.add("error");
+    $("overlayText").textContent = "生成失败";
+    $("overlaySub").textContent = msg || "";
+    document.querySelectorAll("#stageList .st.run").forEach(function(el){ el.classList.remove("run"); el.classList.add("err"); });
+    if(detail) appendGenLog("[err] " + detail);
+    flushGenLog();
+  }
+
+  // ---- 开发自检挂钩（宿主用 ExecuteScript 读回界面真实状态）----
+  window.__devShowOverlay = function(){
+    $("overlay").classList.remove("error"); $("overlay").classList.remove("done");
+    $("overlayText").textContent = "开发自检";
+    $("overlaySub").textContent = "验证宿主 → 网页消息投递";
+    $("overlay").classList.add("show");
+    resetStages();
+  };
+  window.__domProbe = function(){
+    try{
+      var st = [];
+      document.querySelectorAll("#stageList .st").forEach(function(el){
+        var cls = el.className.replace(/\s+/g," ").trim();
+        st.push(el.getAttribute("data-st") + ":" + (cls.replace("st","").trim() || "-"));
+      });
+      return JSON.stringify({
+        stages: st,
+        page: (document.querySelector("#main .page.active")||{id:"?"}).id,
+        nav: (document.querySelector("#sidebar .nav.active")||{getAttribute:function(){return "?"}}).getAttribute("data-page"),
+        logs: $("genLog") ? $("genLog").childNodes.length : -1,
+        overlayShown: $("overlay").classList.contains("show"),
+        overlayTitle: $("overlayText").textContent,
+        timer: $("overlayTimer") ? $("overlayTimer").textContent : "",
+        audio: AUDIO_PATH ? AUDIO_PATH.split(/[\\/]/).pop() : "",
+        precision: PRECISION,
+        genBtnDisabled: $("genBtn").disabled,
+        genSpinOn: (function(){ var s = $("genSpin"); return s ? s.className.indexOf("on") >= 0 : null; })(),
+        stemRows: document.querySelectorAll("#stemList .stem-row").length,
+        histRows: document.querySelectorAll("#histList .item").length,
+        sideFoot: $("sideFoot") ? $("sideFoot").textContent : "",  // 元素已删（2026-09-22），留空值兜住老探针
+        navCount: document.querySelectorAll("#sidebar .nav").length,
+        // —— 第 1 条：工作台入口 ——
+        wbEmptyShown: $("wbEmptyCard") ? $("wbEmptyCard").style.display !== "none" : null,
+        wbPickShown: $("wbPickWrap") ? $("wbPickWrap").style.display !== "none" : null,
+        midiRows: document.querySelectorAll("#midiList .item").length,
+        midiSel: (function(){ var e = document.querySelector("#midiList .item.sel");
+                              return e ? (+e.getAttribute("data-i")) : -1; })(),
+        midiSelSong: MIDI_SEL ? (MIDI_SEL.song || MIDI_SEL.name) : "",
+        wbBtnDisabled: $("openWbBtn") ? $("openWbBtn").disabled : null,
+        wbInfo: $("wbInfo") ? $("wbInfo").textContent : "",
+        wbEmptyText: $("wbEmptyText") ? $("wbEmptyText").textContent : "",
+        // —— 第 2 条：材质（2026-09-22 主人裁定：4 张卡 → 下拉；
+        //     同日第三轮：原生 <select> → 自绘 ComboBox #matSelect）——
+        //   ★ 读数一律从**菜单 DOM** 拿（`#matSelect-menu .dd-opt`），不读 JS 变量、也不读
+        //     组件实例 —— 变量/DOM 万一脱节，主人眼睛看到的那一份才算数。
+        matOptions: document.querySelectorAll("#matSelect-menu .dd-opt").length,
+        matNames: Array.prototype.map.call(document.querySelectorAll("#matSelect-menu .dd-opt"),
+                   function(o){ return o.getAttribute("data-v"); }),
+        matSel: (function(){ var e = document.querySelector("#matSelect-menu .dd-opt.on");
+                             return e ? e.getAttribute("data-v") : ""; })(),
+        // ★ 2026-09-22 第四轮：档位名全英文（Acrylic/Mica/Tabbed/Solid），说明句保持中文。
+        //   这里把「名字」与「说明」**分开读**：
+        //     · 名字只能取 `.dd-tx` 的**文本子节点** —— `.dd-h`（说明）是它的子元素，
+        //       直接读 `tx.textContent` 会把说明也算进名字里（我自己的对照探针就这么错过一次，
+        //       当时误报"说明重复了两遍"，其实产品是对的）。
+        //     · `matHints` 数的是每项挂了几段说明：调用方若把说明同时塞进 label 和 hint，
+        //       这里就会读到 2 —— 用来钉住"恰好一份"。
+        matLabels: Array.prototype.map.call(document.querySelectorAll("#matSelect-menu .dd-opt"),
+                     function(o){
+                       var tx = o.querySelector(".dd-tx"); if(!tx) return "";
+                       var s = "";
+                       for(var i = 0; i < tx.childNodes.length; i++){
+                         if(tx.childNodes[i].nodeType === 3){ s += tx.childNodes[i].textContent; }
+                       }
+                       return s.trim();
+                     }),
+        matHints: Array.prototype.map.call(document.querySelectorAll("#matSelect-menu .dd-opt"),
+                    function(o){
+                      var h = o.querySelector(".dd-h");
+                      return h ? h.textContent.replace(/^\s*—\s*/, "").trim() : "";
+                    }),
+        matHintCounts: Array.prototype.map.call(document.querySelectorAll("#matSelect-menu .dd-opt"),
+                         function(o){ return o.querySelectorAll(".dd-h").length; }),
+        // 整个设置页的可见文本 —— 给「旧中文档位名 / 最省电 再也不出现」那条负判据用。
+        // 取整页而不是只取下拉：万一哪天有人把旧名写进状态栏、说明行或按钮上，这里照样抓得到。
+        settingsText: (function(){
+          var el = document.getElementById("page-settings");
+          return el ? el.textContent.replace(/\s+/g, " ") : "";
+        })(),
+        // 负判据：设置页里**不该再有原生 <select>**（它那层灰弹窗是浏览器画的，
+        // 只要留下一个，主人截图里那个"系统灰框"就会回来）。数量 0 才算换干净。
+        natSelects: document.querySelectorAll("#page-settings select").length,
+        // 正判据：触发器得是自绘的 <button class="dd">、菜单得是挂在 body 下的固定浮层
+        // （浮层必须脱离卡片，否则会被 .card / 滚动容器的 overflow 裁掉）。
+        ddIsButton: (function(){
+          var e = $("matSelect");
+          return !!e && e.tagName === "BUTTON" && /(^|\s)dd(\s|$)/.test(e.className);
+        })(),
+        ddFloats: (function(){
+          var m = document.querySelector("#matSelect-menu");
+          return !!m && m.parentNode === document.body && getComputedStyle(m).position === "fixed";
+        })(),
+        // —— 第 2b 条：深色 / 浅色（2026-09-22 第二轮胶囊 → 下拉选框 #appearSelect）——
+        // theme 读的是 **<html> 上那个属性**（真正驱动 CSS 的东西），不是 JS 变量 ——
+        // 变量和属性万一脱节，属性才是主人眼睛看到的那一份。
+        theme: (function(){
+          try{ return document.documentElement.getAttribute("data-theme") || "(未设)"; }catch(e){ return "(读不到)"; }
+        })(),
+        appearSel: (function(){ var e = document.querySelector("#appearSelect-menu .dd-opt.on");
+                                return e ? e.getAttribute("data-v") : ""; })(),
+        appearBtns: Array.prototype.map.call(document.querySelectorAll("#appearSelect-menu .dd-opt"),
+                      function(o){
+                        var tx = o.querySelector(".dd-tx");
+                        return tx ? tx.textContent : o.textContent;
+                      }),
+        // 那一行真的排出来了（不是 0 高）。原来读的是胶囊容器的高度；改成下拉之后
+        // 读**整行**的高度 —— 判据的意图没变（"这一行存在且占位正常"），只是换了量谁。
+        appearRowH: (function(){
+          var r = document.querySelector("#page-settings .appear-row");
+          return r ? Math.round(r.getBoundingClientRect().height) : -1;
+        })(),
+        // 负判据：卡片 / 胶囊 / 预览框现在都**不该有**了（主人 2026-09-22 明确要去掉）
+        matCards: document.querySelectorAll("#matGrid .mcard").length,
+        matSwatches: document.querySelectorAll("#matGrid .mcard .sw").length,
+        matChips: document.querySelectorAll("#matGrid .dlight").length,
+        appearPills: document.querySelectorAll("#appearSeg .dl").length,
+        // —— 第 2c 条：浅色下控件"看不看得见"（2026-09-22 主人反馈："看不到控件的背景和框框了"）——
+        //   读的是**计算样式**而不是源码：壳里的 shell-ui.css 是后加载的、会盖掉页面自己的
+        //   `--border`，只 grep index.html 的 CSS 会得出"有描边"的假结论。
+        //   取 btn（实心按钮）/ dd（自绘下拉触发器）/ card（卡片）三类，正好覆盖"背景 + 框框"。
+        ctlColors: (function(){
+          function cs(sel){
+            var el = document.querySelector(sel);
+            if(!el){ return null; }
+            var s = getComputedStyle(el);
+            // ⚠ 取**左边**那条描边（borderLeftColor），不取顶边：
+            //   壳里刻意让顶边比四周淡一点（"光从上面来"），顶边那条天生更浅，
+            //   拿它当"框框够不够明显"的判据会误判成不达标。
+            return { bg: s.backgroundColor, line: s.borderLeftColor, top: s.borderTopColor };
+          }
+          return {
+            btn:  cs("#page-settings button.btn"),
+            dd:   cs("#appearSelect"),
+            card: cs("#page-settings .card")
+          };
+        })(),
+        // —— 第 3 条：关于页 ——
+        // ★ 2026-09-26：界面上那行解释实现的小字已删（主人要求别把内部实现与绝对路径写给用户看），
+        //   所以这里读**变量**而不是读 DOM。断言语义不变：缺件时它是"该放哪儿"的首选路径。
+        explainPath: EXPLAIN_PATH,
+        // 关于页卡片里还有没有那种"解释程序怎么干活"的提示行（应该没有 ⇒ 空串）
+        aboutHint: (function(){
+          var h = document.querySelector("#page-about .hint");
+          return h ? h.textContent.replace(/\s+/g, " ") : "";
+        })(),
+        aboutMdLen: $("aboutMd") ? $("aboutMd").innerHTML.length : -1,
+        aboutMdHasH1: $("aboutMd") ? !!$("aboutMd").querySelector("h1,h2,p") : false,
+        explainMissingShown: $("explainMissing") ? $("explainMissing").style.display !== "none" : null,
+        // —— 第 9 条：训练页 ——
+        trainRows: $("trainCard") ? $("trainCard").querySelectorAll(".kv").length : -1,
+        trainText: $("trainCard") ? $("trainCard").innerText.replace(/\s+/g, " ").slice(0, 800) : "",
+        // —— 第 10 条：生成页选型说明 ——
+        //   ⚠ 用 textContent 而不是 innerText：这段在 <details> 里，收起状态下 innerText 是空的，
+        //     拿它断言会得到"文案没写"的假结论。
+        pickHelp: !!$("pickHelp"),
+        pickHelpOpen: $("pickHelp") ? $("pickHelp").classList.contains("open") : null,
+        pickHelpText: $("pickHelp") ? ($("pickHelp").textContent || "").replace(/\s+/g, " ").slice(0, 900) : ""
+      });
+    }catch(e){ return "PROBE_ERR:" + e; }
+  };
+
+  // 最大化 / 还原的字形：**只换 <use> 指向的图标**，不重建按钮。
+  // 用文字字形（▢ / ❐）时有三个毛病：字宽不等会让两个状态宽度差 2px（按钮会抖）、
+  // 字体不同机器上字形不一样、和旁边两个图标风格对不上。
+  // 🔴 查不到 <use> 就什么都不做 —— shell-ui.js 万一没加载，这里绝不能反过来抛错，
+  //    否则一条"图标没出来"会连累整个消息处理全停。
+  function setWinGlyph(zoomed){
+    var b = $("maxBtn"); if(!b) return;
+    var u = b.querySelector("use");
+    if(u) u.setAttribute("href", zoomed ? "#i-restore" : "#i-square");
+    b.title = zoomed ? "还原" : "最大化";
+  }
+
+  // ---- 接收宿主消息 ----
+  // 抽成具名函数：真链路走 chrome.webview 的 message 事件，headless 自检走 __devHostMsg，
+  // **两条路进的是同一个处理函数** —— 否则自检就只是在测一份副本。
+  function onHostMessage(d){
+    if(d.type==="schema"){ /* 参数表由工作台自己消费，本页不需要 */ }
+    else if(d.type==="gen_progress"){ showOverlay(d.text||"生成中…", $("overlaySub").textContent); }
+    else if(d.type==="gen_stage"){ markStage(d.n, d.name, d.detail); }
+    else if(d.type==="gen_log"){ appendGenLog(d.line||""); }
+    else if(d.type==="generated"){
+      if(!d.ok){
+        failOverlay(d.msg||"未知错误", d.detail||d.msg||"");
+        $("genStatus").textContent = "生成失败：" + (d.msg||"");
+        $("genStatus").className = "status err";
+        gotoStep(2);
+        return;
+      }
+      finishStages();
+      genBusy(false);
+      if(d.logfile) appendGenLog("[ok] 全链路运行日志：" + d.logfile);
+      flushGenLog();
+      var f = d.failed || [];
+      $("genStatus").textContent = genDoneText(d.stems, f);
+      $("genStatus").className = "status " + (f.length ? "" : "ok");
+      $("overlay").classList.add("done");
+      $("overlayText").textContent = "谱面已生成";
+      $("overlaySub").textContent = "正在打开Adofai-Chart-Generator并载入谱面…";
+    }
+    else if(d.type==="nav_studio"){
+      genBusy(false);
+      $("overlay").classList.add("done");
+      $("overlayText").textContent = "谱面已生成";
+      $("overlaySub").textContent = "正在打开Adofai-Chart-Generator并载入谱面…";
+    }
+    else if(d.type==="filepath"){
+      if(d.dest==="audio") setMusic(d.path);
+    }
+    else if(d.type==="stems"){ renderStems(d.jobs); }
+    else if(d.type==="history"){ renderHistory(d.items); }
+    else if(d.type==="midis"){ renderMidis(d.items); }
+    else if(d.type==="material"){
+      // 明暗先落定，再刷材质卡：反过来的话卡片会先用**旧的**明暗渲染一遍，
+      // 那一帧里"深色/浅色"的小胶囊会显示上一次的状态（闪一下）。
+      if(d.appearance) applyTheme(d.appearance);
+      onMaterialChanged(d.name);
+      ShellUI.MatFade.settle();
+    }
+    else if(d.type==="explain"){ renderExplain(d); }
+    else if(d.type==="explain_written"){
+      $("explainStatus").textContent = d.ok ? "模板已写入：" + (d.path||"") : ("写入失败：" + (d.msg||""));
+      $("explainStatus").className = "status " + (d.ok ? "ok" : "err");
+      if(d.ok) post({type:"getexplain"});
+    }
+    else if(d.type==="traininfo"){ renderTrain(d.data); }
+    else if(d.type==="appinfo"){ renderAppInfo(d.data); }
+    else if(d.type==="cleaned"){
+      $("cleanStatus").textContent = d.text || "已清理";
+      $("cleanStatus").className = "status ok";
+    }
+    else if(d.type==="backend_status"){ /* 仅记录 */ }
+    else if(d.type==="winstate"){ setWinGlyph(!!d.zoomed); RZ_ZOOMED = !!d.zoomed; }
+  }
+
+  window.chrome.webview.addEventListener("message", function(e){
+    var d; try{ d = JSON.parse(e.data); }catch(_){ return; }
+    onHostMessage(d);
+  });
+
+  // 开发自检：headless 探针里没有真宿主，直接喂一条宿主消息进来
+  window.__devHostMsg = function(json){
+    try{ onHostMessage(typeof json === "string" ? JSON.parse(json) : json); return "OK"; }
+    catch(e){ return "ERR:" + e; }
+  };
+
+  // （原 refreshWbInfoDone 已删：工作台页改成「历史 MIDI 选择列表」，信息由 #wbInfo 直接写。）
+
+  // 启动即发一条消息：宿主以「网页第一条消息」判定页面已就绪
+  // ★ 先画一次深浅胶囊（用 APPEAR_META 里的默认两档）。不放在 appinfo 里等：
+  //   设置页是**随点随进**的，等宿主回话才画会闪一下空白；
+  //   宿主回的 appearances 只是把清单校正一遍（多一档/换文案时）。
+  renderAppearance();
+  post({type:"get_schema"});
+})();
+</script>
+</body>
+</html>

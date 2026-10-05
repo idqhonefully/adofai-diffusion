@@ -1,0 +1,13 @@
+{
+  "id": "dev.adocharter.bdg-bridge",
+  "version": "0.1.0",
+  "name": {
+    "zh": "ADO 谱面桥",
+    "en": "ADO Charter Bridge"
+  },
+  "description": {
+    "zh": "把当前工程的踩点实时推给 ADO 谱面生成器（只读；分段采音用）。不修改宿主。",
+    "en": "Pushes the current project's beats to the ADO charter generator (read-only, for segment sampling). Does not modify the host."
+  },
+  "renderer": "renderer.js"
+}

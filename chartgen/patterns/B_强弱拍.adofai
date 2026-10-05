@@ -1,0 +1,226 @@
+{
+	"angleData": [
+		0,
+		270,
+		0,
+		0,
+		90,
+		0,
+		0,
+		90,
+		90,
+		90,
+		90,
+		180,
+		180,
+		90,
+		90,
+		90,
+		90,
+		0,
+		0
+	],
+	"settings": {
+		"version": 19,
+		"artist": "",
+		"specialArtistType": "None",
+		"artistPermission": "",
+		"song": "",
+		"author": "",
+		"separateCountdownTime": false,
+		"previewImage": "",
+		"previewIcon": "",
+		"previewIconColor": "ffffff",
+		"previewSongStart": 0,
+		"previewSongDuration": 10,
+		"seizureWarning": false,
+		"levelDesc": "",
+		"levelTags": "",
+		"artistLinks": "",
+		"speedTrialAim": 0.0,
+		"difficulty": 0,
+		"requiredMods": [],
+		"songFilename": "",
+		"bpm": 120,
+		"volume": 100,
+		"offset": 0,
+		"pitch": 100,
+		"hitsound": "Kick",
+		"hitsoundVolume": 25,
+		"countdownTicks": 4,
+		"tileShape": "Long",
+		"trackColorType": "Single",
+		"trackColor": "debb7b",
+		"secondaryTrackColor": "ffffff",
+		"trackColorAnimDuration": 2,
+		"trackColorPulse": "None",
+		"trackPulseLength": 10,
+		"trackStyle": "Standard",
+		"trackTexture": "",
+		"trackTextureScale": 1,
+		"trackGlowIntensity": 100,
+		"trackAnimation": "None",
+		"beatsAhead": 3,
+		"trackDisappearAnimation": "None",
+		"beatsBehind": 4,
+		"backgroundColor": "000000",
+		"showDefaultBGIfNoImage": true,
+		"showDefaultBGTile": true,
+		"defaultBGTileColor": "101121",
+		"defaultBGShapeType": "Default",
+		"defaultBGShapeColor": "ffffff",
+		"bgImage": "",
+		"bgImageColor": "ffffff",
+		"parallax": [
+			100,
+			100
+		],
+		"bgDisplayMode": "FitToScreen",
+		"imageSmoothing": true,
+		"lockRot": false,
+		"loopBG": false,
+		"scalingRatio": 100,
+		"relativeTo": "Player",
+		"position": [
+			0,
+			0
+		],
+		"rotation": 0,
+		"zoom": 200,
+		"pulseOnFloor": true,
+		"bgVideo": "",
+		"loopVideo": false,
+		"vidOffset": 0,
+		"floorIconOutlines": false,
+		"stickToFloors": true,
+		"planetEase": "Linear",
+		"planetEaseParts": 1,
+		"planetEasePartBehavior": "Mirror",
+		"defaultTextColor": "ffffff",
+		"defaultTextShadowColor": "00000050",
+		"congratsText": "",
+		"perfectText": "",
+		"legacyFlash": false,
+		"legacyCamRelativeTo": false,
+		"legacySpriteTiles": false,
+		"legacyTween": false,
+		"disableV15Features": false
+	},
+	"actions": [
+		{
+			"floor": 1,
+			"eventType": "EditorComment",
+			"comment": "B1 附点四分 + 八分\ntravel: 270° · 90°\n记谱(1字符=15°): X·················X·····\n转角: +90 -90  合计 +0°\n位置: (+0.00,+0.00) (+0.00,+1.00) (-1.00,+1.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 1,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		},
+		{
+			"floor": 4,
+			"eventType": "EditorComment",
+			"comment": "B2 八分 + 附点四分\ntravel: 90° · 270°\n记谱(1字符=15°): X·····X·················\n转角: -90 +90  合计 +0°\n位置: (+0.00,+0.00) (+0.00,+1.00) (+1.00,+1.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 4,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		},
+		{
+			"floor": 7,
+			"eventType": "EditorComment",
+			"comment": "C1 八分 + 四分\ntravel: 90° · 180°\n记谱(1字符=15°): X·····X···········\n转角: -90 +0  合计 -90°\n位置: (+0.00,+0.00) (+0.00,+1.00) (+1.00,+1.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 7,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		},
+		{
+			"floor": 10,
+			"eventType": "EditorComment",
+			"comment": "C2 四分 + 八分\ntravel: 180° · 90°\n记谱(1字符=15°): X···········X·····\n转角: +0 -90  合计 -90°\n位置: (+0.00,+0.00) (+0.00,+1.00) (+0.00,+2.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 10,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		},
+		{
+			"floor": 13,
+			"eventType": "EditorComment",
+			"comment": "C3 附点四分 + 四分\ntravel: 270° · 180°\n记谱(1字符=15°): X·················X···········\n转角: +90 +0  合计 +90°\n位置: (+0.00,+0.00) (+0.00,+1.00) (-1.00,+1.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 13,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		},
+		{
+			"floor": 16,
+			"eventType": "EditorComment",
+			"comment": "C4 四分 + 附点四分\ntravel: 180° · 270°\n记谱(1字符=15°): X···········X·················\n转角: +0 +90  合计 +90°\n位置: (+0.00,+0.00) (+0.00,+1.00) (+0.00,+2.00)\n不闭合\n（Twirl 待摆）"
+		},
+		{
+			"floor": 16,
+			"eventType": "PositionTrack",
+			"positionOffset": [
+				3.0,
+				0.0
+			],
+			"relativeTo": [
+				0,
+				"ThisTile"
+			],
+			"justThisTile": false,
+			"editorOnly": false
+		}
+	],
+	"decorations": []
+}

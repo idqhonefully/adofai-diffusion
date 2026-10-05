@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <AssemblyName>AdofaiStudio</AssemblyName>
+    <RootNamespace>AdofaiStudio</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>ADOFAI Studio</Product>
+
+    <!-- 编译期产物路径统一在 ..\..\Directory.Build.props 里设（那里才够早） -->
+
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ErrorReport>none</ErrorReport>
+    <DebugType>embedded</DebugType>
+
+    <!-- 任务栏 / Alt+Tab / 资源管理器 都用它。
+         app.ico 是 tools/make-icon.py 从 gui/icon.ico 重打包的多尺寸版
+         （原图目录项谎报 256，实际载荷 4096×4096，2.8 MB；重打包后 7 个尺寸共 191 KB）。 -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  </ItemGroup>
+
+</Project>

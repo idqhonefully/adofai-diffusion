@@ -1,0 +1,643 @@
+/* ADOFAI Studio · 工作台样式（自有 Mica 壳 · 重新排版移植）
+   ------------------------------------------------------------------
+   深色半透主题，配色走「夜色 + 青蓝高亮」，刻意与Adofai-Chart-Generator原皮肤区分开。
+
+   ★★ 本文件有两条「命门」，改动布局前务必先读 ★★
+   1) 列向 flex 的子项一律要 min-height:0。默认 min-height:auto 会让子项
+      不得小于**内容**最小高度；canvas 是固有比例元素（300:150），宽度拉到
+      740 时按比例推出高 370 → #tlwrap 从 92px 暴涨到 370px，把 #stage 挤成
+      0 高，预览窗格直接"消失"。行向 flex 同理要 min-width:0（左栏曾被内部
+      长文件路径撑到 463px）。
+   2) 画布/工具条的尺寸不靠 CSS 猜，靠 JS 的 sizeViews() 量真实 clientWidth
+      再设 canvas.width/height（band.js 的 size() 就是这么做的）。CSS 只管
+      给容器一个确定的高度，别让内容反过来撑容器。                              */
+
+:root {
+  --bg:        #0e1116;
+  --bg-2:      #151a22;
+  --bg-3:      #1b212b;
+  --panel:     rgba(24, 30, 40, 0.72);
+  --panel-2:   rgba(30, 37, 49, 0.85);
+  --line:      rgba(255, 255, 255, 0.08);
+  --line-2:    rgba(255, 255, 255, 0.14);
+  --text:      #d7dde6;
+  --text-dim:  #8b97a6;
+  --text-mute: #5b6675;
+  --accent:    #4fc3f7;
+  --accent-2:  #2f8f6a;
+  --warn:      #f0a830;
+  --bad:       #f85149;
+  --ok:        #56d364;
+  /* 叠层与两个特例色（2026-09-22 抽出来支持浅色主题）——
+     白叠层在浅底上等于没有，浅色主题要把它们翻成黑叠层。 */
+  --fill-faint: rgba(255,255,255,0.02);
+  --fill-soft:  rgba(255,255,255,0.03);
+  --fill-hover: rgba(255,255,255,0.04);
+  --fill-mid:   rgba(255,255,255,0.06);
+  --fill-strong:rgba(255,255,255,0.12);
+  --btn-hover:  #232c39;
+  --tab-on-fg:  #eaf6ff;
+  /* 预览**舞台**（#stage）的底：**两种主题都保持深色**。
+     它跟视频编辑器的监视窗是一回事 —— 谱面预览的配色是照深底调的，
+     换成浅底画面会糊。浅色主题换的是它周围的面板与控件。
+     ⚠ 时间轴（#tlwrap / #ovwrap）**不在这里**了：2026-09-22 起它跟主题走，见下面的 --tl-*。 */
+  --stage-bg:   #0a0d12;
+  /* ── 时间轴（段带 #tlwrap / 全曲条 #ovwrap）的调色板 ──────────────────────
+     ★ 2026-09-22 主人裁定：这两块**要跟主题走**。原来它们跟 #stage 一起被钉成深色，
+     浅色主题下整条时间轴还是黑的（主人："这个还是黑色的"，截图里段带/刻度/标记/波形全黑，
+     唯独中间那行播放控制已经变白了 —— 一黑一白夹着，最难看）。
+     预览舞台 #stage（监视窗）**仍保持固定深色**：谱面预览的配色是照深底调的。
+     唯一真相源 = 下面这几个变量：CSS 用它们铺容器底，band.js / overview.js 通过
+     views/stagepal.js 把同一批变量读成 canvas 画笔色 —— 改一处两边同步。 */
+  --tl-bg:          #0a0d12;
+  --tl-axis:        #0d1218;                  /* 段带「标记」行的底 */
+  --tl-grid:        #1b232c;                  /* 段带刻度竖线 */
+  --tl-line:        rgba(255,255,255,0.10);   /* 全曲条刻度横线 */
+  --tl-tick:        rgba(255,255,255,0.28);
+  --tl-text:        #8b98a4;                  /* 刻度文字 / HUD */
+  --tl-text-strong: #eaf4ff;                  /* 段标签 / 拖拽把手 / 三押记号 */
+  --tl-dim:         #5b6874;                  /* 「标记」行标题 */
+  --tl-shade:       rgba(255,255,255,0.035);  /* 泳道行底 */
+  --tl-segline:     #0b0f14;                  /* 未选中段的描边 */
+  --tl-floor:       rgba(127,179,213,0.20);   /* 层数密度条 */
+  --tl-tile-cell:   rgba(126,231,135,0.13);
+  --tl-tile-edge:   #7ee787;
+  --tl-tile-text:   #b8f0bf;
+  --radius:    8px;
+  --top-h:     46px;
+  --report-h:  152px;
+  font-family: "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
+  /* ⚠ 2026-10-05：这里原先挂着一份 [SOLID-OVERRIDE] 的实色档配色块（照导入页那一档写的：
+     底 #191919／外框 #202020／卡片 #2f2f2f／控件 #3e3e3e），但它**写在 :root{} 里面** ⇒
+     CSS 嵌套会把它当「& html[dark][solid]」相对展开成 `:root html[dark][solid]`
+     （html 不可能套在 html 里）⇒ 永远匹配不到，是**死代码**。
+     实测佐证：solid 档下工作台面板仍是 #181D24（夜色青蓝），而不是 #2f2f2f。
+     现按主人裁定删除：**工作台不参与 solid 实色档配色**，保持夜色青蓝。
+     控件/卡片那组 token 的「退出 solid」覆盖写在 workbench/index.html 的内联 <style> 里
+     （必须落在 shell-ui.css 的 <link> 之后才压得住）。想让工作台整套吃 solid，
+     先去那儿看反向说明。 */
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  /* ★ 透明：让宿主壳的 DWM Acrylic（亚克力）透出来。
+     顶栏/左栏/右栏/标签栏/报告栏已是半透明 + backdrop-filter，会叠在亚克力上成磨砂层；
+     #stage/#tlwrap/#ovwrap 等 canvas 区保持不透明实底（渲染需要）。 */
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+button, select, input { font-family: inherit; font-size: 12.5px; color: var(--text); }
+button {
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+  white-space: nowrap;
+}
+button:hover { background: var(--btn-hover); border-color: var(--accent); }
+button.primary { background: linear-gradient(180deg, #2a6d8f, #1f5573); border-color: #3a8db0; color: #eaf6ff; }
+button.primary:hover { filter: brightness(1.12); }
+button.ghost { background: transparent; }
+button.mini { padding: 3px 7px; font-size: 11.5px; }
+
+/* 画布：一律 block + 允许被压缩（配合容器的 min-height:0） */
+canvas { display: block; min-width: 0; min-height: 0; }
+
+#app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ───────── 顶栏 ───────── */
+#top {
+  height: var(--top-h);
+  flex: 0 0 var(--top-h);
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  overflow: hidden;
+}
+#top .brand { font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
+#top .ver { color: var(--text-mute); font-size: 11px; white-space: nowrap; }
+#top .badge { color: var(--ok); font-size: 14px; }
+#top .badge.bad { color: var(--bad); }
+#top .srcbadge {
+  font-size: 11.5px; padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg-3); border: 1px solid var(--line-2); color: var(--text-dim);
+}
+#top .grow, .grow { flex: 1 1 auto; }
+#top .hint { color: var(--text-mute); font-size: 11.5px; white-space: nowrap; }
+#top select {
+  /* ★ padding-right 是给 shell-ui.css 里那个自绘 Win11 chevron 留的位置 ——
+     那边的 `select{padding-right:26px}` 优先级低于这条 id 选择器，覆盖不过来；
+     不让位的话箭头会压在文字上。改下拉外观时这两处要一起看。
+     🔴 2026-09-22 修：这里**只能用 background-color**，不能写 `background:` 简写。
+     简写会把 background-image 重置成 none，并把 background-repeat/position/size 一并重置为
+     初始值（repeat / 0% 0% / auto）—— 于是 shell-ui.css 那条 chevron 就废了：
+     深色下看不到箭头，浅色下 `html[data-theme="light"] select` 只补了 background-image，
+     repeat/position/size 仍是初始值 ⇒ **箭头被平铺满整个下拉框**（主人截图里那排"√√√√√"）。 */
+  background-color: var(--bg-3); border: 1px solid var(--line-2);
+  border-radius: 4px; padding: 4px 24px 4px 7px;
+}
+#top button { margin-left: 2px; }
+
+/* ───────── 工作区 ───────── */
+#work { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
+
+.pane {
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel);
+}
+/* ★ min-width:0 必写：flex item 默认 min-width:auto，会被内部长路径/长文本撑破 */
+#left  { flex: 0 0 312px; min-width: 0; overflow: hidden; }
+/* 右栏：检查器单栏（所有参数组按 schema 顺序纵向排列，不再拆半、不再浮起） */
+#rcol { flex: 0 0 380px; min-width: 0; display: flex; flex-direction: row; overflow: hidden; }
+#right { flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+
+
+.zhead {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px; font-weight: 600; color: var(--accent);
+  background: var(--fill-soft);
+  border-bottom: 1px solid var(--line);
+  cursor: default;
+  overflow: hidden; white-space: nowrap;
+}
+.zbody {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  word-break: break-word;
+  padding: 8px 10px;
+}
+.zbody::-webkit-scrollbar, .groups::-webkit-scrollbar, .vbar::-webkit-scrollbar { height: 9px; width: 9px; }
+.zbody::-webkit-scrollbar-thumb, .groups::-webkit-scrollbar-thumb, .vbar::-webkit-scrollbar-thumb {
+  background: var(--fill-strong); border-radius: 6px;
+}
+.vbar::-webkit-scrollbar { height: 6px; }
+
+/* 分隔条：5px 抓手 + 1px 可见线（左右对称；拖动实现见 app.js bindSplits()）
+   ★ 原来只有 left / tl 两条，right 那条漏搬 ⇒ 右栏没线也没抓手（2026-09-19 主人报障）。
+   线画在 .split 上而不是 #left/#rcol 的 border 上，这样左右两侧完全对称、不会重复画线。 */
+.split { flex: 0 0 5px; background: transparent; cursor: col-resize;
+         border-left: 1px solid var(--line); touch-action: none; }
+.split[data-split="tl"] { cursor: row-resize; border-left: 0; background: var(--line); }
+/* 报告带上面那条（横向拖 = 改高度；收起时 JS 给它加 .hidden） */
+.split[data-split="report"] { cursor: row-resize; border-left: 0; background: var(--line); }
+.split.hidden { display: none; }
+/* 悬停 / 拖动中高亮 —— 告诉用户这 5px 就是能拖的（对齐原版 studio） */
+.split:hover, .split.on { background: var(--accent); border-left-color: var(--accent); }
+.split[data-split="tl"]:hover, .split[data-split="tl"].on { background: var(--accent); }
+.split[data-split="report"]:hover, .split[data-split="report"].on { background: var(--accent); }
+
+/* ───────── 中栏 ───────── */
+#center {
+  flex: 1 1 auto; display: flex; flex-direction: column;
+  min-width: 0; min-height: 0; overflow: hidden;
+}
+/* ★ 列向 flex 子项统一允许压缩，否则内容（canvas 固有比例 / 长文本）会反向撑容器 */
+#center > * { min-height: 0; }
+
+#tabs {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 4px;
+  padding: 5px 8px; background: var(--panel-2); border-bottom: 1px solid var(--line);
+  overflow: hidden;
+}
+.tab {
+  background: transparent; border: 1px solid transparent; color: var(--text-dim);
+  padding: 4px 12px; border-radius: 6px; white-space: nowrap;
+}
+.tab:hover { color: var(--text); background: var(--fill-hover); }
+.tab.active { color: var(--tab-on-fg); background: rgba(79,195,247,0.16); border-color: rgba(79,195,247,0.4); }
+#tabs .hint { color: var(--text-mute); font-size: 11px; white-space: nowrap; overflow: hidden; }
+
+/* 舞台：预览窗格的宿主。min-height 保底，保证「预览窗格」不会被别的条挤没 */
+#stage { position: relative; flex: 1 1 0%; min-height: 200px; overflow: hidden; background: var(--stage-bg); }
+.view { position: absolute; inset: 0; display: none; width: 100%; height: 100%; }
+.view.active { display: block; }
+#cv-adofai { width: 100%; height: 100%; }
+#cv-roll, #cv-path, #cv-falling { display: none; }
+#cv-roll.active, #cv-path.active, #cv-falling.active { display: block; }
+
+/* 预览状态提示：只在「加载中 / 失败」时显示的一行小字，贴在舞台底部。
+   它**不是卡片、不遮画布**——预览是自动加载的，正常出图时这一层完全不存在。 */
+#ph-note {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  z-index: 5; max-width: 88%; padding: 6px 14px; border-radius: 999px;
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(16,21,29,0.84); border: 1px solid var(--line);
+  backdrop-filter: blur(10px); box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  font-size: 12px; line-height: 1.5; color: #9fb0c4; text-align: left;
+  pointer-events: none;
+}
+#ph-note.hidden { display: none; }
+#ph-note button {
+  pointer-events: auto; flex: 0 0 auto;
+  padding: 3px 10px; font-size: 11.5px; border-radius: 999px; cursor: pointer;
+  color: #cfe8ff; background: rgba(79,195,247,0.16); border: 1px solid rgba(79,195,247,0.4);
+}
+#ph-note button:hover { background: rgba(79,195,247,0.26); }
+#ph-note button.hidden { display: none; }
+
+/* 视图工具条：单行 + 横向滚动。绝不允许换行 —— 长中文 hint 在 flex row 里会被压窄
+   逐字换行，把这条撑到 200px+，进而挤掉 #stage。 */
+#viewbars { flex: 0 0 auto; min-height: 0; display: flex; overflow: hidden; }
+.vbar {
+  display: none; align-items: center; gap: 8px; width: 100%;
+  padding: 3px 10px; background: var(--bg-2);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  font-size: 11.5px; color: var(--text-dim);
+  white-space: nowrap; overflow-x: auto; overflow-y: hidden;
+}
+.vbar.on { display: flex; }
+.vbar > * { flex: 0 0 auto; }
+.vbar .hint { color: var(--text-mute); white-space: nowrap; }
+/* 工具条里的参数控件横排（默认 .field 是竖排 label+控件，会把条撑到 40px+） */
+.vbar .field { flex-direction: row; align-items: center; gap: 6px; }
+.vbar .field label { white-space: nowrap; }
+.vbar .field input, .vbar .field select { width: 104px; flex: 0 0 auto; }
+.vbar .field.wide label { flex: 0 0 auto; }
+
+/* ───────── 谱面预览工具条：「音源与偏移」摘要 + 点开的浮层 ───────── */
+/* ★ 为什么收进浮层：这一坨（偏移 ms / 按实测建议 / 正值提示 / 预览音源 / 原曲文件 /
+   原曲偏移 Δ）横排要约 900px，窗口窄一点就顶出横向滚动条 —— 主人报「显示不全」；
+   可全摆出来又太占地方、挡预览。现在：**一行摘要常驻**（当前音源 + 偏移值，点它就能
+   开设置），细节收进浮层，需要时才浮起来、点外面即收。 */
+.vbar .vsum {
+  background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 999px;
+  padding: 2px 9px; color: var(--text-dim);
+  /* ★ 允许收缩 + 省略号：窗口窄到极限时（左栏 312 + 右栏 380 吃掉大半），
+     这颗药丸会顶出横向滚动条（820px 窗口实测 190 > 118）。给它 min-width:0
+     让它跟 flex 一起缩、文字裁成 …，完整信息仍在 title 提示里。 */
+  flex: 0 1 auto; min-width: 0; max-width: 100%;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.vbar .vsum b { color: var(--text); font-weight: 600; }
+/* ★ 2026-09-21 主人裁定：音源**就绪**时这颗药丸不显示 —— 否则它天天横在预览框下面。
+   就绪 ⇒ 加 .hidden（药丸）+.empty（那条只剩空板的工具条），**两个一起收**，
+   否则会留一条 30px 的光板在预览框下面。没就绪（要的那份音频没接上）才亮，
+   那时再加 .warn 变成警告色，点它就能改。
+   ⚠ style.css 里没有全局 .hidden（只有 .split.hidden / #av-pop.hidden 之类），
+     所以这里必须显式写一条，别指望别处的规则。 */
+.vbar .vsum.hidden { display: none; }
+.vbar .vsum.warn { color: var(--warn); border-color: rgba(240,168,48,0.5); }
+#vbar-chart.empty { display: none; }   /* 比 `.vbar.on{display:flex}` 更具体（带 id）⇒ 压得住 */
+#av-pop {
+  position: fixed; z-index: 70; width: 340px; max-width: 92vw;
+  background: var(--panel-2); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0,0,0,0.5); backdrop-filter: blur(14px);
+  padding: 8px 10px 10px;
+}
+#av-pop.hidden { display: none; }
+#av-pop .avhead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+                  font-size: 12px; font-weight: 600; color: var(--accent); }
+#av-pop .avhead .grow { flex: 1 1 auto; }
+#av-pop .avbody { display: flex; flex-direction: column; gap: 7px; }
+#av-pop .hint { color: var(--text-mute); font-size: 11px; line-height: 1.5; white-space: normal; }
+#av-pop .row { display: flex; align-items: center; gap: 8px; }
+
+/* ★ min-height:0 是命门：canvas 固有比例 300:150 在宽 740 时会推出高 370 */
+#tlwrap { flex: 0 0 92px; min-height: 0; overflow: hidden; background: var(--tl-bg); }
+#cv-band { width: 100%; height: 100%; display: block; }
+
+#playbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; background: var(--panel-2); border-bottom: 1px solid var(--line);
+  min-height: 0; overflow: hidden;
+}
+#playbar #btn-play { min-width: 72px; }
+#playbar #slider { flex: 1 1 auto; min-width: 60px; accent-color: var(--accent); height: 4px; }
+#playbar #lbl-time { font-variant-numeric: tabular-nums; color: var(--text-dim); min-width: 132px; text-align: right; white-space: nowrap; }
+#playbar input[type=range][id=vol] { width: 90px; flex: 0 0 auto; accent-color: var(--accent-2); }
+#playbar #audio-src { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+#ovwrap { flex: 0 0 64px; min-height: 0; overflow: hidden; background: var(--tl-bg); }
+#cv-overview { width: 100%; height: 100%; display: block; }
+
+/* ───────── 报告带（可收起 / 可调高） ───────── */
+/* ★ 默认收起：只剩标题栏一行（里面有 #rep-brief 摘要，重要信息不丢）。
+   展开后高度 = --report-h（拖上面的 .split[data-split="report"] 改，双击复位）。 */
+#report {
+  flex: 0 0 var(--report-h); height: var(--report-h);
+  min-height: 0; overflow: hidden;
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+#report.collapsed { flex: 0 0 auto; height: auto; }
+#report.collapsed .chips, #report.collapsed .status, #report.collapsed #more { display: none; }
+#report.collapsed > .zhead { border-bottom: 0; }
+#report > .zhead { flex: 0 0 auto; padding: 3px 9px; cursor: pointer; user-select: none; }
+#report > .zhead:hover { background: var(--fill-mid); }
+#report > .zhead .caret { color: var(--text-mute); font-size: 10px; }
+#rep-brief {
+  color: var(--text-dim); font-size: 11.5px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 60%;
+}
+#rep-tip { color: var(--text-mute); font-size: 11.5px; white-space: nowrap; }
+.chips {
+  flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px 4px;
+  max-height: 62px; overflow: auto;
+}
+.chip {
+  font-size: 11.5px; padding: 2px 9px; border-radius: 999px; white-space: nowrap;
+  background: var(--bg-3); border: 1px solid var(--line-2); color: var(--text-dim);
+  cursor: default;
+}
+.chip b { color: var(--text); }
+.chip.warn { border-color: rgba(240,168,48,0.5); color: var(--warn); }
+.chip.bad  { border-color: rgba(248,81,73,0.5); color: var(--bad); }
+
+/* ★ 报告长文本：按「；」自动分行（app.js 的 setStatus 会插换行），
+   不再是挤成一坨、看着像系统报错的一长行。超出高度自己滚。 */
+.status {
+  flex: 1 1 auto; min-height: 0;
+  padding: 2px 10px 4px; color: var(--text-dim); font-size: 12px; line-height: 1.55;
+  white-space: pre-wrap; word-break: break-word; overflow: auto;
+}
+#more {
+  flex: 0 0 auto; min-height: 0; overflow: hidden;
+  padding: 0 10px 8px;
+}
+#more summary { cursor: pointer; color: var(--text-mute); font-size: 11.5px; }
+#more .timing, #more .warnings {
+  white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 11px;
+  color: var(--text-dim); max-height: 64px; overflow: auto; margin-top: 4px;
+}
+#more .warnings { color: var(--warn); }
+
+/* ───────── 检查器（schema 驱动） ───────── */
+#psearch {
+  width: 100%; margin-bottom: 8px; padding: 6px 8px;
+  background: var(--bg-3); border: 1px solid var(--line-2); border-radius: 6px; color: var(--text);
+}
+section.grp { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+section.grp > h4 {
+  margin: 0; padding: 6px 9px; font-size: 12px; font-weight: 600; color: var(--accent);
+  background: var(--fill-soft); cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 6px;
+}
+section.grp > h4 .caret { color: var(--text-mute); font-size: 10px; }
+section.grp.collapsed > .body { display: none; }
+section.grp > .body { padding: 8px 9px; display: flex; flex-direction: column; gap: 7px; }
+
+.field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.field label { color: var(--text-dim); font-size: 11.5px; }
+.field .ctl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.field input[type=text], .field input[type=number], .field select {
+  /* 🔴 同 #top select：`background:` 简写会重置 background-image 与 repeat/position/size，
+     把 shell-ui.css 的自绘 chevron 抹掉 ⇒ 浅色下箭头被平铺。必须用 background-color。 */
+  flex: 1 1 auto; min-width: 0; background-color: var(--bg-3);
+  border: 1px solid var(--line-2); border-radius: 6px; padding: 4px 7px; color: var(--text);
+}
+/* 给自绘 chevron 留位置（合并规则里不能单独给 select 加右内边距，所以拆一条） */
+.field select { padding-right: 24px; }
+.field input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); flex: 0 0 auto; }
+.field input:disabled, .field select:disabled { opacity: .45; }
+.field .unit { color: var(--text-mute); font-size: 11px; }
+.field.wide { flex-direction: row; align-items: center; }
+.field.wide label { flex: 0 0 46%; }
+.hint, .info { color: var(--text-mute); font-size: 11px; line-height: 1.5; }
+.info { background: rgba(79,195,247,0.06); border: 1px solid rgba(79,195,247,0.18);
+        border-radius: 6px; padding: 6px 8px; }
+.subhead { color: var(--accent-2); font-size: 11.5px; font-weight: 600; margin-top: 4px; }
+.list { display: flex; flex-direction: column; gap: 2px; }
+.list label {
+  display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-radius: 5px;
+  cursor: pointer; font-size: 12px; min-width: 0;
+}
+.list label > span:not(.t) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list label:hover { background: var(--fill-hover); }
+.list label.sel { background: rgba(79,195,247,0.16); }
+.list label input[type=checkbox] { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; }
+.list label .t.drum { color: var(--warn); }
+.list label.disabled, .list label input:disabled { opacity: .4; }
+.list.xk-locked { opacity: .45; }
+.regions { display: flex; flex-direction: column; gap: 3px; }
+.regions .reg {
+  display: flex; justify-content: space-between; gap: 6px; font-size: 11.5px;
+  padding: 3px 7px; background: var(--bg-3); border: 1px solid var(--line); border-radius: 6px;
+}
+/* ⑤d 演出分段的「可编辑行」（对应原版 .region 家族）：起止方块 + 入场/出场招选 + ✕ 删除 */
+.region { border: 1px solid var(--line-2); border-left: 3px solid var(--accent); border-radius: 6px;
+  background: var(--bg-3); padding: 5px 7px; display: flex; flex-direction: column; gap: 4px; }
+.region.sel { border-color: var(--accent); background: rgba(79,195,247,0.08); }
+.region .rhead { display: flex; align-items: center; gap: 6px; }
+.region .rname { flex: 1; min-width: 0; background: transparent; border: 1px solid transparent;
+  color: var(--text); font-size: 11.5px; padding: 1px 3px; border-radius: 3px; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; }
+.region .rtime { display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 11px; }
+.region .rtime span.hint { flex: 0 0 auto; }
+.region .rtime input { width: 62px; font-size: 11px; padding: 2px 4px; }
+/* padding-right 让位给 shell-ui.css 那个自绘的 Win11 chevron（这条优先级比那边高，
+   不让位箭头就会压在文字上）；小尺寸下拉把箭头也缩小一档。 */
+.region .rtime select {
+  font-size: 11px; min-width: 0; flex: 1 1 0;
+  padding: 2px 18px 2px 5px;
+  background-size: 10px 10px; background-position: right 4px center;
+}
+.region .rrow { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.region .rdel { background: transparent; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 13px; padding: 0 2px; }
+.region .rdel:hover { color: var(--bad); }
+/* ③b 采bpm 区间行：比 ⑤d 多「毫秒/格 单位选择」与「N / 多押轨」一行 */
+.region .rtime select.xkunit { flex: 0 0 auto; width: 52px; }
+.region .rrow input.xktrk {
+  flex: 1 1 70px; min-width: 0; background: var(--bg-2); border: 1px solid var(--line-2);
+  color: var(--text); border-radius: 5px; font-size: 11px; padding: 2px 5px;
+}
+.region .rrow > span { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+
+/* ───────── 自绘下拉框（Win11 ComboBox）在工作台的**落位** ─────────────────────
+   ★ 2026-09-22 主人："工作台里面的下拉选单也换成这个"（= 设置页那套自绘版）。
+   做法见 app.js 的 upgradeSelects()：原生 <select> 留着当数据源（加 .dd-src 隐身），
+   自绘触发器插在它**原来的位置**上。于是原本写在 select 上的 flex 规则不再命中，
+   这一块按每个位置逐条补回 —— 只补"占多宽、在行里怎么长"，
+   高度/字号/圆角由 shell-ui.css 的 .dd-sm / .dd-xs 给（同原来的 select 一个尺度）。
+   ⚠ 改这里的 flex 前先想清楚：这些行是 flex 容器，触发器一旦不收缩就会把整行顶出横向滚动条。 */
+.field .ctl > .dd, .field > .dd { flex: 1 1 auto; min-width: 0; }   /* 检查器字段 / 分数段条：铺满右侧 */
+.vbar .field > .dd { width: 104px; flex: 0 0 auto; }                /* 竖工具条：原 select 也是定宽 104 */
+#top > .dd { flex: 0 1 auto; }                                      /* 顶栏「密度」：按内容宽 */
+.region .rtime > .dd { flex: 1 1 0; min-width: 0; }                 /* 区间行：与相邻小输入分宽 */
+.region .rtime > .dd.xkunit { flex: 0 0 auto; width: 52px; }        /* 毫秒/格 单位：定宽 */
+.region .rrow > .dd { flex: 0 0 auto; }                             /* 每段的 N：按内容宽 */
+
+/* ───────── toast / 进度 / 弹窗 ───────── */
+#toast {
+  position: fixed; left: 50%; bottom: calc(var(--report-h) + 14px); transform: translateX(-50%);
+  background: rgba(20,26,34,0.95); border: 1px solid var(--line-2); color: var(--text);
+  padding: 8px 16px; border-radius: 8px; font-size: 12.5px; opacity: 0; pointer-events: none;
+  transition: opacity .2s; z-index: 50; max-width: 70vw;
+}
+#toast.on { opacity: 1; }
+
+#progress { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex;
+            align-items: center; justify-content: center; z-index: 60; }
+#progress.hidden { display: none; }
+#progress .pbar { width: 320px; height: 8px; background: var(--bg-3); border-radius: 999px; overflow: hidden; }
+#progress #pfill { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .2s; }
+#progress .ptext { margin-top: 10px; text-align: center; color: var(--text-dim); }
+#progress .ptext button { margin-top: 6px; }
+
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex;
+         align-items: center; justify-content: center; z-index: 70; }
+#modal.hidden { display: none; }
+#modal .card { width: min(560px, 90vw); background: var(--panel-2); border: 1px solid var(--line-2);
+               border-radius: 12px; padding: 16px 18px; }
+#modal h3 { margin: 0 0 10px; color: var(--accent); }
+#modal pre { white-space: pre-wrap; color: var(--text-dim); font-size: 12px; max-height: 50vh; overflow: auto; }
+#modal .row.right { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* ───────────────── BDG 编辑器桥面板 ───────────────── */
+.bridge { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--fill-faint); }
+.bridge .bhead { display: flex; align-items: center; gap: 6px; padding: 6px 9px; background: var(--fill-soft); border-bottom: 1px solid var(--line); }
+.bridge .btitle { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+.bridge .bdot { color: var(--text-mute); font-size: 13px; flex: 0 0 auto; }
+.bridge .bdot.on { color: var(--ok); }
+.bridge .burl { font-family: Consolas, "Microsoft YaHei UI", monospace; font-size: 10.5px; color: var(--text-mute);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.bridge .brow { display: flex; gap: 6px; padding: 6px 9px 0; }
+.bridge .brow button { flex: 1 1 0; }
+.bridge .bstat { padding: 6px 9px; font-size: 11px; line-height: 1.5; color: var(--text-dim);
+  white-space: pre-wrap; word-break: break-word; }
+.bridge .bstat.bad { color: var(--bad); }
+.bridge .bstat.warn { color: var(--warn); }
+.bridge .bstat.hidden { display: none; }
+
+/* ==========================================================================
+   Win11 动效层（2026-09-21）
+   --------------------------------------------------------------------------
+   曲线与时长全部取自 Fluent motion 规范，token 定义在 ../shell-ui.css（--fl-*）。
+   这一段是**覆盖式**的：与上面的规则同优先级、位置在后 ⇒ 只改「过渡与按压反馈」，
+   尺寸 / 颜色 / 布局一个字不动（要改外观去上面各自的规则里改，别在这儿改）。
+   ========================================================================== */
+
+/* ① 可点控件统一走 standard 曲线（原先是浏览器默认的 ease，快慢很"网页"） */
+button, .tab, .chip, select, input, .list label, .region, .split {
+  transition-timing-function: var(--fl-ease-std);
+}
+
+/* ② 按钮：把 transform 纳入过渡（原写法只有 background / border-color，按下去没有反馈） */
+button {
+  transition: background var(--fl-dur-fast) var(--fl-ease-std),
+              border-color var(--fl-dur-fast) var(--fl-ease-std),
+              color var(--fl-dur-fast) var(--fl-ease-std),
+              box-shadow var(--fl-dur-fast) var(--fl-ease-std),
+              transform var(--fl-dur-xfast) var(--fl-ease-std);
+}
+/* Win11 的控件按下去轻微内缩、松手弹回 —— 这一下是"系统感"最容易被感知的地方。
+   :not(:disabled) 是必须的：禁用态的按钮还能按下去会让人以为点动了。 */
+button:not(:disabled):active, .tab:active, .chip:active, .list label:active { transform: scale(.975); }
+
+/* ③ 标签页：选中态原来只有颜色瞬变，加一点"长出来"的落位感 */
+.tab { transition: color var(--fl-dur-fast) var(--fl-ease-std),
+                   background var(--fl-dur-fast) var(--fl-ease-std),
+                   border-color var(--fl-dur-fast) var(--fl-ease-std),
+                   transform var(--fl-dur-xfast) var(--fl-ease-std); }
+
+/* ④ 分隔条：hover / 拖动时高亮要渐变出来，不能一碰就跳色 */
+.split { transition: background var(--fl-dur-fast) var(--fl-ease-std); }
+
+/* ⑤ 折叠展开：display 的变化 transition 抓不到，改用 animation ——
+     元素从 display:none 重新参与渲染时动画会重新开始，正好是"淡入 + 落位"。 */
+section.grp:not(.collapsed) > .body { animation: fl-in-up var(--fl-dur) var(--fl-ease-dec) both; }
+#report:not(.collapsed) .chips,
+#report:not(.collapsed) .status,
+#report:not(.collapsed) #more { animation: fl-in-fade var(--fl-dur) var(--fl-ease-dec) both; }
+
+@keyframes fl-in-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fl-in-up {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ⑥ toast：除了淡入，再抬起 6px —— 纯淡入像"贴上来"，带位移才像"浮出来" */
+#toast {
+  transform: translateX(-50%) translateY(6px);
+  transition: opacity var(--fl-dur) var(--fl-ease-dec),
+              transform var(--fl-dur) var(--fl-ease-dec);
+}
+#toast.on { transform: translateX(-50%) translateY(0); }
+
+/* ⑦ 弹窗 / 进度遮罩：淡入，卡片再上浮一点 */
+#modal:not(.hidden), #progress:not(.hidden) { animation: fl-in-fade var(--fl-dur) var(--fl-ease-dec) both; }
+#modal:not(.hidden) .card { animation: fl-in-up var(--fl-dur-slow) var(--fl-ease-dec) both; }
+
+/* ⑧ 音源浮层：从触发它那颗药丸的附近浮出来 */
+#av-pop:not(.hidden) { animation: fl-in-up var(--fl-dur) var(--fl-ease-dec) both; }
+
+/* ⑨ 图标间距的两处例外（默认的 .38em 右边距是留给"图标 + 文字"的）：
+      · .zhead 是 flex 容器，自己有 gap:6px，再带右边距就双份；
+      · #health 是纯图标徽标，后面没有文字，那点右边距只会把顶栏挤宽。 */
+.zhead > .ico, #health > .ico, .caret > .ico { margin-right: 0; }
+/* #health 是"纯图标徽标"：20 视窗里那个圆按 1.05em 渲染出来只有 5px 上下，
+   比原来的 ● 字符还小 —— 状态点看不清就等于没有，单独给它定个尺寸。 */
+#health > .ico { width: 10px; height: 10px; }
+
+/* ⑩ 无障碍：系统里关了动画效果就全停（这一条优先于上面所有观感考虑） */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+
+/* ============================================================================
+   浅色主题（html[data-theme="light"]）
+   ----------------------------------------------------------------------------
+   由宿主把属性设在 <html> 上（MainWindow.ApplyAppearance / ThemeInjectJs），
+   所以这一页**一行 JS 都不用改**也能跟着切 —— 这正是把主题做成"属性 + 变量"的好处。
+
+   ⚠ 预览**舞台 #stage** 故意保持深色（--stage-bg 不覆盖）：
+     它跟视频编辑器的监视窗是一回事，谱面预览的配色是照深底调的。
+   ★ 时间轴（#tlwrap / #ovwrap）**跟着亮**（--tl-* 在这里整组覆盖）——
+     2026-09-22 主人裁定：浅色下时间轴还黑着，跟已经变白的播放控制行夹在一起最难看。
+     覆盖的不只是底色，还有栅格/文字/段描边那一整套（band.js、overview.js 从 CSS 变量读）。
+   ============================================================================ */
+html[data-theme="light"] {
+  --bg:        #f3f3f3;
+  --bg-2:      #e6e6ea;          /* 比 --bg-3 深：深色里它就是"更沉"的那一档，关系别翻 */
+  --bg-3:      #f2f2f5;
+  --panel:     rgba(255,255,255,0.74);
+  --panel-2:   rgba(255,255,255,0.90);
+  --line:      rgba(0,0,0,0.10);
+  --line-2:    rgba(0,0,0,0.16);
+  --text:      #1b1b20;
+  --text-dim:  #5c5c66;
+  --text-mute: #8a8a94;
+  --accent:    #1f63d6;          /* 浅底上要把蓝压暗一档，否则字发飘 */
+  --warn:      #a15c00;
+  --bad:       #c0271f;
+  --ok:        #1a7f37;
+  --fill-faint: rgba(0,0,0,0.02);
+  --fill-soft:  rgba(0,0,0,0.035);
+  --fill-hover: rgba(0,0,0,0.05);
+  --fill-mid:   rgba(0,0,0,0.06);
+  --fill-strong:rgba(0,0,0,0.08);
+  --btn-hover:  #e3e3e8;
+  --tab-on-fg:  #0b4c66;
+  /* ★ 时间轴浅色档：底变亮、字变深、栅格从"白叠层"翻成"黑叠层"。
+     注意这些值的**明暗关系**要和深色档一致（谁比谁沉不能翻），
+     否则段块的对比在浅色下会糊成一片。 */
+  --tl-bg:          #f7f7fa;
+  --tl-axis:        #eceef3;
+  --tl-grid:        #dcdee6;
+  --tl-line:        rgba(0,0,0,0.12);
+  --tl-tick:        rgba(0,0,0,0.30);
+  --tl-text:        #5c5c66;
+  --tl-text-strong: #1b1b20;
+  --tl-dim:         #8a8a94;
+  --tl-shade:       rgba(0,0,0,0.035);
+  --tl-segline:     rgba(0,0,0,0.28);
+  --tl-floor:       rgba(31,99,214,0.18);
+  --tl-tile-cell:   rgba(26,127,55,0.12);
+  --tl-tile-edge:   #1a7f37;
+  --tl-tile-text:   #14532d;
+}

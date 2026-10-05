@@ -1,0 +1,3 @@
+# 保留文件原始行尾，禁止 git 自动转换：
+# 本项目 .py / index.html 为 CRLF，gui/tools/*.js 为 LF，混合存在，统一按字节原样入库。
+* -text

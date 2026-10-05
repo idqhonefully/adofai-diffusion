@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<!-- ==========================================================================
+  UI：三区 + 停靠 + 段带（docs/49 方案 A）
+  --------------------------------------------------------------------------
+  左「来源与段」· 中「视图预览（上）+ 段带（下）」· 右「检查器」· 底「报告带」
+  · Shift+M = 布局编辑模式（全 UI 冻结，只拖块）
+  · 布局脱手即存 <userData>/ui-layout.json（见 layout.js / main.js）
+  ★ 所有 e2e 依赖的 id 一律保留（#panel / #groups / #lst-* / #status / #more …）
+========================================================================== -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src http://127.0.0.1:*; connect-src http://127.0.0.1:*" />
+<title>ADOFAI 谱面生成器</title>
+<link rel="stylesheet" href="style.css" />
+<!-- ★ 工作台 / 亚克力皮肤：必须排在 style.css 之后（覆盖式，不改 JS / DOM） -->
+<link rel="stylesheet" href="skin-workbench.css" />
+<!-- ★ 布局增量改造：新元素（报告带标题栏 / 工具条药丸 / 音源浮层）的结构样式。
+     排最后；不采用布局改造时可以不引这一行。 -->
+<link rel="stylesheet" href="workbench-elements.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- ───────────── 顶栏 ───────────── -->
+  <div id="top">
+    <b class="brand">ADOFAI 谱面生成器</b>
+    <span class="ver" id="ver"></span>
+    <span class="badge" id="health" title="sidecar 状态">●</span>
+    <span class="srcbadge" id="src-badge">未加载</span>
+    <span class="grow"></span>
+    <span class="hint">预设</span>
+    <select id="preset">
+      <option>默认</option><option>满直线</option>
+      <option>直拟合·时序优先</option><option>手工打磨</option>
+    </select>
+    <span class="hint">密度</span>
+    <select id="density">
+      <option value="compact">紧凑</option><option value="normal" selected>标准</option>
+      <option value="loose">宽松</option>
+    </select>
+    <button id="btn-layout" title="Shift+M：所有 UI 块可拖 / 滚轮缩放；进入后全 UI 冻结">✥ 移动模式</button>
+    <button id="btn-reset-layout" class="ghost" title="所有区域 / 浮窗恢复默认">恢复默认布局</button>
+    <button id="btn-about" class="ghost" title="参数说明 / 快捷键">?</button>
+    <button id="btn-rebuild" class="primary">▶ 重新生成</button>
+    <button id="btn-export">导出谱面…</button>
+  </div>
+
+  <div id="dock-top" class="dock empty" data-dock="top"></div>
+
+  <div id="work">
+    <!-- ───────────── 左：来源与段 ───────────── -->
+    <div id="dock-left" class="dock" data-dock="left">
+      <div id="left" class="pane" data-pane="left" style="width:330px">
+        <div class="zhead">⣿ 来源与段
+          <span class="grow"></span><span class="hint">拖我换边</span></div>
+        <div class="zbody" id="panel-left">
+          <div id="groups-left"></div>
+
+          <div id="bridge" class="bridge">
+            <div class="bhead">
+              <span class="btitle">BDG 编辑器桥</span>
+              <span id="br-dot" class="bdot" title="未连接">○</span>
+              <span id="br-url" class="burl" title="连接串（贴进 BDG 面板）"></span>
+              <button id="br-copy" class="ghost mini" title="复制连接串">⧉</button>
+            </div>
+            <div class="brow">
+              <button id="br-host" title="把 BDG 宿主拉起来，并把连接串推进它的插件面板（一键）">▶ 启动并桥接</button>
+              <button id="br-hoststop" class="ghost" title="停掉**我们起的**那个宿主进程">■ 停止宿主</button>
+            </div>
+            <div class="brow">
+              <button id="br-push" title="把我们当前的音点按角色投射进 BDG 编辑器">投射到编辑器</button>
+              <button id="br-pull" title="收回编辑器里的改动（对账：留下/移动/删除/新增）">收回改动</button>
+            </div>
+            <div id="br-hoststat" class="bstat"></div>
+            <div id="br-status" class="bstat">（未检查）</div>
+            <div id="back-box" class="bstat hidden"></div>
+            <div class="brow">
+              <button id="br-backuse" class="ghost mini"
+                      title="用收回的轨道重算谱面（音轨 = BDG 里带时值数据的那些轨）">用收回的轨道重建</button>
+              <button id="br-backclear" class="ghost mini"
+                      title="清掉收回的轨道，回到「从选轨采音」">清掉收回</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="split" data-split="left"></div>
+
+    <!-- ───────────── 中：视图预览 + 段带 ───────────── -->
+    <div id="center">
+      <div id="tabs">
+        <button class="tab active" data-tab="chart">★ 谱面预览</button>
+        <button class="tab" data-tab="roll">钢琴卷帘</button>
+        <button class="tab" data-tab="path">谱面路径（验打结）</button>
+        <button class="tab" data-tab="falling">4K 下落式（验采音）</button>
+        <span class="grow"></span>
+        <span class="hint" id="tab-hint" title=""></span>
+      </div>
+
+      <div id="stage">
+        <div id="cv-adofai" class="view active"></div>
+        <canvas id="cv-roll" class="view"></canvas>
+        <canvas id="cv-path" class="view"></canvas>
+        <canvas id="cv-falling" class="view"></canvas>
+        <!-- ★ ③b 采bpm：我们自己的「格子 ↔ 毫秒」参考叠加层（在 Re_ADOJAS 自带那块下面） -->
+        <div id="xk-hud" class="xk-hud">采bpm 骨架：未配置</div>
+      </div>
+
+      <div id="viewbars">
+        <div class="vbar" data-for="chart" id="vbar-chart"></div>
+        <div class="vbar" data-for="roll" id="vbar-roll">
+          <span class="hint">滚轮=缩放 / Ctrl+滚轮=音高范围 / Shift+滚轮=平移 / 左键拖动=平移 / 中键=跳转</span>
+        </div>
+        <div class="vbar" data-for="path" id="vbar-path"></div>
+        <div class="vbar" data-for="falling" id="vbar-falling"></div>
+      </div>
+
+      <div class="split" data-split="tl" style="cursor:row-resize;flex:0 0 5px"
+           title="拖我 = 改段带高度"></div>
+      <div id="tlwrap"><canvas id="cv-band"></canvas></div>
+
+      <div id="playbar">
+        <button id="btn-play">▶ 播放</button>
+        <input id="slider" type="range" min="0" max="1000" value="0" step="1" />
+        <span id="lbl-time">0:00.00 / 0:00.00</span>
+        <label>音量</label>
+        <input id="vol" type="range" min="0" max="100" value="70" step="1" />
+        <span class="hint" id="audio-src"></span>
+      </div>
+
+      <div id="ovwrap"><canvas id="cv-overview"></canvas></div>
+    </div>
+
+    <div class="split" data-split="right"></div>
+
+    <!-- ───────────── 右：检查器 ───────────── -->
+    <div id="dock-right" class="dock" data-dock="right">
+      <div id="right" class="pane" data-pane="right" style="width:340px">
+        <div class="zhead">⣿ 检查器
+          <span class="grow"></span><span class="hint" id="selname">未选中</span></div>
+        <div class="zbody" id="panel">
+          <input type="text" id="psearch" placeholder="搜索参数（中文名 / key，Ctrl+P）" />
+          <div class="presets" id="presets"></div>
+          <div id="groups"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="split" data-split="bottom" style="cursor:row-resize;flex:0 0 5px"></div>
+
+  <!-- ───────────── 底：报告带 ───────────── -->
+  <div id="dock-bottom" class="dock" data-dock="bottom">
+    <div id="report" class="pane collapsed" data-pane="report">
+      <!-- ★ 增量改造：点标题栏 = 收起 / 展开（默认收起，只剩这一行摘要）。
+           #rep-brief 由 app.js 的 syncReportHead() 写：状态栏首句 + 警告条数。 -->
+      <div class="zhead" id="rep-head" style="padding:3px 9px"
+           title="点这里收起 / 展开报告带 · 拖上面的分隔条改高度（双击复位）">
+        <span class="caret" id="rep-caret">▸</span>⣿ 报告 / 警告
+        <span class="grow"></span>
+        <span class="hint" id="rep-brief"></span>
+        <span class="hint">点数字看明细</span></div>
+      <div class="chips" id="chips"></div>
+      <div id="detail"></div>
+      <div id="status" class="status">（等待加载文件）</div>
+      <details id="more">
+        <summary>时序 / 警告 <span id="warn-badge" class="badge2"></span></summary>
+        <div id="timing" class="timing"></div>
+        <div id="warnings" class="warnings"></div>
+      </details>
+    </div>
+  </div>
+</div>
+
+<!-- ★ 大直线（采bpm）浮窗：原设计是把 ③b 那一组整个搬进来（可拖 / 可缩 / 可折叠 / 松手即存）。
+     本次布局改造后 ③b 已经排进右栏检查器（③ 采音 与 ④ 求解 之间）—— 这个浮窗就空了，
+     app.js 会给它打 `fl-empty`，由 workbench-elements.css 整块隐藏。
+     元素本身保留：将来想把某一组放回浮窗，只改 app.js 里那一行路由即可。 -->
+<div class="float pane" id="fl-xk" data-pane="flx"
+     style="left:120px;top:44px;width:340px;height:250px">
+  <div class="fhead">大直线（采bpm）
+    <span class="grow"></span><span class="hint" id="xk-mini">未配置</span>
+    <span class="x" data-act="collapse" title="折叠">–</span>
+    <span class="x" data-act="close" title="关掉（可从「恢复默认布局」再开）">×</span>
+  </div>
+  <div class="fbody" id="groups-xk"></div>
+  <div class="grip"></div>
+</div>
+
+<div id="lmbanner">
+  ✥ <b>移动模式</b> <span class="frozen">· 内容已冻结（不响应任何点击）</span>
+  <button id="lm-exit" style="padding:2px 9px">退出</button>
+</div>
+<div id="lmhud">—</div>
+<div id="toast"></div>
+
+<div id="progress" class="hidden">
+  <div class="pbar"><div id="pfill"></div></div>
+  <div class="ptext"><span id="ptext">准备中…</span>
+    <button id="pcancel" class="ghost">取消</button></div>
+</div>
+
+<div id="modal" class="hidden">
+  <div class="card">
+    <h3 id="m-title">参数说明</h3>
+    <pre id="m-body"></pre>
+    <div class="row right"><button id="m-close" class="primary">知道了</button></div>
+  </div>
+</div>
+
+<audio id="player" preload="auto"></audio>
+<!-- 【仅浏览器预览用】给 window.dsh 一份最小替身；Electron 里有 preload，本行可删 -->
+<script src="__preview_stub.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

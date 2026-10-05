@@ -6,9 +6,15 @@ title ADOFAI Studio (C# 壳)
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
-rem ---- D 盘那套 .NET（与 C 盘的系统运行时完全隔离）----
-set "DOTNET_ROOT=D:\dotnet\sdk10"
-set "DOTNET_HOST=D:\dotnet\sdk10\dotnet.exe"
+rem ---- .NET：优先 PATH 里的 dotnet；维护者本机另放在 D:\dotnet\sdk10 ----
+set "DOTNET_HOST="
+where dotnet >nul 2>&1 && set "DOTNET_HOST=dotnet"
+if not defined DOTNET_HOST (
+  if exist "D:\dotnet\sdk10\dotnet.exe" (
+    set "DOTNET_ROOT=D:\dotnet\sdk10"
+    set "DOTNET_HOST=D:\dotnet\sdk10\dotnet.exe"
+  )
+)
 
 set "SELF=%ROOT%out\Release\net10.0-windows\win-x64\publish\AdofaiStudio.exe"
 set "DEV=%ROOT%out\Debug\net10.0-windows\AdofaiStudio.exe"
@@ -40,17 +46,17 @@ goto :report
 :rundev
 if not exist "%DEVDLL%" if exist "%SELF%" goto :runself
 if not exist "%DEVDLL%" goto :nobuild
-if not exist "%DOTNET_HOST%" (
+if not defined DOTNET_HOST (
   echo.
-  echo [错误] 找不到 D:\dotnet\sdk10\dotnet.exe
-  echo         开发版需要它；或改用自包含版：
-  echo         dotnet publish -c Release -r win-x64 --self-contained true
+  echo [错误] 找不到 dotnet（开发版需要 .NET 10 SDK）
+  echo         请把 dotnet 加入 PATH，或安装到 D:\dotnet\sdk10
+  echo         或改用自包含版：dotnet publish -c Release -r win-x64 --self-contained true
   echo.
   pause
   exit /b 2
 )
 echo [启动] 开发版  （%DEVTIME%，比自包含版新^）
-echo        需要 D:\dotnet\sdk10
+echo        需要 .NET 10 SDK（dotnet 须在 PATH，或 D:\dotnet\sdk10）
 echo        如果窗口一闪而过，看日志：%ROOT%logs\app.log
 echo.
 "%DOTNET_HOST%" "%DEVDLL%"
@@ -70,7 +76,7 @@ echo [错误] 还没编译过，找不到可执行文件。
 echo.
 echo   编译命令：
 echo     cd /d "%ROOT%src\AdofaiStudio.App"
-echo     D:\dotnet\sdk10\dotnet.exe publish -c Release -r win-x64 --self-contained true
+echo     dotnet publish -c Release -r win-x64 --self-contained true
 echo.
 pause
 exit /b 1
@@ -95,7 +101,7 @@ echo 两个构建：
 echo   自包含版 %SELF%
 echo             ^(自带运行时，拷到别的机器也能跑^)
 echo   开发版   %DEV%
-echo             ^(需 D:\dotnet\sdk10^)
+echo             ^(需 .NET 10 SDK：PATH 或 D:\dotnet\sdk10^)
 echo.
 echo 挑哪一份：按文件时间跑**更新的那个** —— 免得改了代码却跑着旧发布版。
 echo.

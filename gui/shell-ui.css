@@ -1,0 +1,705 @@
+/* ============================================================================
+   ADOFAI Studio · Win11 / Fluent 观感层（shell-ui.css）
+   ----------------------------------------------------------------------------
+   与 shell-ui.js 配套：那边负责注入 Fluent 图标 sprite、扫描 [data-ico]、
+   驱动材质切换的过场动画；这边只管**外观**。
+
+   ★ 本文件只做外观，不碰布局：不写 display / width / height / position / order，
+     唯一的例外是 #shell-mat-veil —— 它是一层独立的全窗浮层，不给它定位就没意义。
+
+   ★ 两个页面共用这一份（gui/index.html 与 gui/workbench/index.html），
+     所以里面不许出现只有某一个页面才存在的 id / 结构；宁可不写。
+     两页的**加载顺序都在各自的样式表之后**，因此同优先级的选择器由本文件胜出。
+
+   ★ Win11 的动效规范（Fluent motion）三条曲线一律照抄官方数值，不自己编：
+       decelerate  cubic-bezier(.1,.9,.2,1)   —— 进入 / 展开 / 出现（快起慢停）
+       accelerate  cubic-bezier(.7,0,1,.5)    —— 离开 / 收起 / 消失（慢起快停）
+       standard    cubic-bezier(.8,0,.2,1)    —— 位移 / 形变 / 状态切换（两端都缓）
+     时长也照官方档位：控件 ~150ms、浮层 ~220ms、页面级 ~340ms。
+   ========================================================================== */
+
+:root {
+  --fl-ease-dec: cubic-bezier(.1, .9, .2, 1);
+  --fl-ease-acc: cubic-bezier(.7, 0, 1, .5);
+  --fl-ease-std: cubic-bezier(.8, 0, .2, 1);
+  --fl-dur-xfast: .1s;
+  --fl-dur-fast: .15s;
+  --fl-dur: .22s;
+  --fl-dur-slow: .34s;
+
+  /* Win11 的控件圆角档位 */
+  --fl-r-ctl: 4px;
+  --fl-r-card: 8px;
+  --fl-r-flyout: 8px;
+
+  /* 焦点环：Win11 是「2px 主色 + 外侧留白」，不是单描边 */
+  --fl-focus: 0 0 0 2px var(--fl-focus-color, #4CC2FF), 0 0 0 5px rgba(0, 0, 0, .55);
+
+  /* ★ 主色（accent）：SelectorBar 高亮条 / 标签下划线 / checkbox 的 accent-color 都吃它。
+     深色档 = Win11 标志性蓝 #4CC2FF（2026-09-28 主人要求"深色模式所有按钮换这色"）；
+     浅色档单独换 WinUI 默认蓝 #0F6CBD（见下方 html[data-theme="light"]）。 */
+  --fl-accent: #4CC2FF;
+  /* 主色按钮上的文字色：深色主色是浅蓝 #4CC2FF ⇒ 用近黑字（#1B1B1B）保对比度；
+     浅色主题在下方 html[data-theme="light"] 里另给 #fff。 */
+  --on-accent: #1B1B1B;
+
+  /* ==========================================================================
+     ★ 控件配色 token（2026-09-22 抽出）
+     --------------------------------------------------------------------------
+     起因：主人切到浅色之后说"看不到控件的背景和框框了"。
+     真因是下面这一层里所有填充与描边都写成**白 + alpha**（Win11 **深色**主题的原值）——
+     在浅灰底上，白描边等于没画；白填充也和白卡片分不开，于是"控件像消失了"。
+     ⇒ 抽成 token：深色一档保持原值**逐字节不变**（深色是主人已经在用的样子，
+        改主题不该顺手改深色），浅色一档单独给。
+
+     浅色一档的两条设计原则（都不是随手挑的数）：
+       ① **描边改成黑 alpha** —— 浅色下"看得见框框"是描边负责的，填充只做微弱区分。
+          这与 WinUI 浅色一致：按钮本来就"和卡片近乎同色 + 一条清晰描边"，
+          硬把填充拉开反而变成网页味。
+       ② **悬停/按下从"更白"改成"压暗"** —— 浅色下白已经没有余量（常态已是近白），
+          再白就是纯白、肉眼看不出变化。压暗也正是 WinUI 浅色的做法。
+       ③ 顶边那条比四周**浅**（不是深）：深色里顶边更亮 = 光从上面来；
+          浅色里表达同一个意思要把顶边画得更靠近底色的亮，而不是更黑。
+     ========================================================================== */
+  --ct-fill:          rgba(255, 255, 255, .0605);  /* 按钮 / 输入框常态底 */
+  --ct-fill-hover:    rgba(255, 255, 255, .0837);
+  --ct-fill-active:   rgba(255, 255, 255, .0326);  /* 按下**比常态更暗**，见下面注释 */
+  --ct-fill-dis:      rgba(255, 255, 255, .0419);
+  --ct-line:          rgba(255, 255, 255, .069);
+  --ct-line-top:      rgba(255, 255, 255, .093);
+  --ct-line-top-hov:  rgba(255, 255, 255, .11);
+  --ct-dis-fg:        rgba(255, 255, 255, .36);
+  --ct-ph:            rgba(255, 255, 255, .38);    /* placeholder */
+  --ct-focus-bg:      rgba(0, 0, 0, .30);          /* 输入框聚焦时压暗的底 */
+  --cd-fill:          rgba(255, 255, 255, .035);   /* 卡片 / 列表项 */
+  --cd-line:          rgba(255, 255, 255, .075);   /* 卡片/列表描边：半透材质 = 白 7.5%（云母/亚克力上勾出软亮边，不刻意隐藏）；实色档由下方 solid 块覆写成黑 10% */
+  --cd-row-line:      rgba(255, 255, 255, .06);    /* 设置行之间的发丝线 */
+}
+
+/* ── 浅色主题下的同一组 token ────────────────────────────────────────────────
+   ⚠ 选择器用 `html[data-theme="light"]`（元素+属性 = 0,1,1）而不是 `:root.light`，
+     它比 `:root`（0,1,0）**优先级更高**，所以这个块放在文件什么位置都生效 ——
+     包括压过下面第 402 行那条 `:root { --fl-focus: … }`（深色版焦点环）。
+   ⚠ 别把这里也写成"白 alpha"：那正是这次要修的 bug。 */
+/* ★ 实色档（dark）控件显式配色（2026-10-05，2026-10-05 再修正） [SOLID-OVERRIDE]
+   与 index.html 实色档分层同调：控件 #3e3e3e、hover #454545、卡片/列表 #2f2f2f。
+   ★★ 同日再修【描边方向】—— 主人："人家 Windows 是没有这种看起来有一圈描边的"。
+   这一组描边原本照半透档写成"白 alpha"（叠在云母/亚克力材质上的亮发丝线），
+   搬到实色底上就变成**一圈亮边**：实测我们的卡片 #2f2f2f 上描边 = #444444，
+   而 Windows 参考图是 #202020 底上的 #1D1D1D —— 比底色**暗**。
+   WinUI 深色描边（Microsoft Learn 主题令牌，权威值），明暗方向相反：
+     · CardStrokeDefault    = #1A000000（黑 10%）⇒ 卡片 / 列表项
+     · ControlStrokeDefault = #12FFFFFF（白 7%）⇒ 按钮 / 输入框 / 下拉
+     · DividerStrokeDefault = #15FFFFFF（白 8%）⇒ 分隔线、格线
+   ⇒ 卡片描边 = 黑 10%（全局，见 :root --cd-line，四种材质通用）；
+     控件描边 = 白 7%（WinUI ControlStrokeDefault，全局一致，见 :root --ct-line）。
+   ⚠ **上一轮把 solid 控件描边也误写成黑 10%**，导致 solid 与 mica/acrylic/tabbed 的按钮描边不一致；
+     现撤掉 solid 对 --ct-line* / --cd-line 的覆写，让四种材质**统一**继承 :root：
+       solid 按钮 = 白 7% 软边（Win11 深色控件本就这样，含"光从上面来"的亮顶边），
+       不再有 solid 专属的黑边。
+   ⚠ `--cd-row-line` 属于 DividerStroke（设置行之间的发丝线）⇒ 保持白，不动。 */
+html[data-theme="dark"][data-material="solid"]{
+  --ct-fill:          #3e3e3e;
+  --ct-fill-hover:    #454545;
+  --ct-fill-active:   #333333;
+  --ct-fill-dis:      #3e3e3e;
+  /* 控件描边（--ct-line / --ct-line-top / --ct-line-top-hov）不在此覆写，
+     继承 :root 白 7%（WinUI ControlStrokeDefault），与 mica/acrylic/tabbed 完全一致。
+     撤掉上一轮误加的黑 10%，solid 按钮恢复 Win11 白软边 + 亮顶边。 */
+  --ct-dis-fg:        rgba(255,255,255,0.40);
+  --ct-ph:            rgba(255,255,255,0.42);
+  --cd-fill:          #2f2f2f;   /* 实色卡片底 #2f2f2f（与 Windows 实色档对齐） */
+  --cd-line:          rgba(0, 0, 0, .10);   /* 实色档卡片描边 = 黑 10%（WinUI CardStrokeDefault），仅 solid；mica/acrylic/tabbed 仍走 :root 白 7.5%（之前感觉） */
+  --cd-row-line:      rgba(255,255,255,0.08);
+}
+
+html[data-theme="light"] {
+  /* ⚠ 一条必须记住的合成规律：**白叠白永远没有对比**。
+     底 #F3F3F3 → 卡片再叠 0.72 白 ⇒ 卡片约 #FCFCFC，已经是近白；
+     此时控件再"叠白"（不管 .45 还是 .95）都会收敛到 #FDFDFD 上下 —— 与卡片差 1~2 阶，
+     肉眼就是"控件不见了"。这正是主人报的那个 bug。
+     ⇒ 浅色下控件填充改成**压暗**：叠黑 0.035 ⇒ 约 #F4F4F4，与卡片拉开 ~8 阶，
+       悬停 0.065、按下 0.10 —— 越按越沉，和深色那一套 "active < hover" 同向。 */
+  --ct-fill:          rgba(0, 0, 0, .035);
+  --ct-fill-hover:    rgba(0, 0, 0, .065);
+  --ct-fill-active:   rgba(0, 0, 0, .100);
+  --ct-fill-dis:      rgba(0, 0, 0, .020);
+  /* 描边比深色那版更实：浅色下"看得见框框"**全靠它**（填充只做微弱区分） */
+  --ct-line:          rgba(0, 0, 0, .18);
+  --ct-line-top:      rgba(0, 0, 0, .10);
+  --ct-line-top-hov:  rgba(0, 0, 0, .14);
+
+  /* 浅色主色：WinUI 默认蓝（#0F6CBD）。原 fallback #4C8DFF 偏亮、浅底上发飘。 */
+  --fl-accent: #0F6CBD;
+  --on-accent: #fff;
+  --ct-dis-fg:        rgba(0, 0, 0, .34);
+  --ct-ph:            rgba(0, 0, 0, .40);
+  --ct-focus-bg:      #FFFFFF;                     /* 浅色聚焦时是纯白，不是压暗 */
+  --cd-fill:          rgba(255, 255, 255, .72);    /* 比 #F3F3F3 的底更白 ⇒ 卡片浮起来 */
+  --cd-line:          rgba(0, 0, 0, .12);
+  --cd-row-line:      rgba(0, 0, 0, .08);
+  /* 焦点环：WinUI 浅色是「黑 2px + 外圈白」，正好是深色那版的明暗倒过来 */
+  --fl-focus: 0 0 0 2px #000, 0 0 0 4px rgba(255, 255, 255, .92);
+}
+
+/* ============================================================================
+   ① 图标系统
+   ----------------------------------------------------------------------------
+   所有图标都是 **描边风格**（stroke 而不是 fill），这是 Fluent 图标族的统一笔法：
+   20×20 视窗、线宽 1.5、端点与拐角都是圆的（round cap / round join）。
+   stroke 与 fill 走 currentColor ⇒ 图标天然跟着文字颜色（主题 / hover / 选中）变，
+   不需要为每种状态再出一套图。颜色一律由**外层**决定，图标自己不写死。
+   ========================================================================== */
+.ico {
+  width: 1.05em;
+  height: 1.05em;
+  flex: 0 0 auto;
+  /* 视觉居中：描边图标的墨迹重心比文字基线略高，负值往上抬一点点才像"对齐" */
+  vertical-align: -.155em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  overflow: visible;
+  /* 不抢指针事件：否则 e.target 变成 svg，那些"看 id / 看类名"的判断会拿不到按钮 */
+  pointer-events: none;
+}
+/* 少数需要实心的（状态圆点 / 播放三角）：把描边关掉、用 currentColor 填 */
+.ico-fill { fill: currentColor; stroke: none; }
+.ico-lg { width: 1.35em; height: 1.35em; }
+.ico-sm { width: .92em; height: .92em; }
+
+/* ★ 字体字形版的图标（目前只有「设置」用，见 shell-ui.js 里 ICONS.settings 的说明）。
+   盒子尺寸与 svg 版对齐（1.05em），但**字号必须由使用处显式给** —— 因为 svg 的墨迹
+   会随盒子缩，字形的墨迹只随字号变，两者不是一个量纲（侧栏的盒子是写死的 22px，
+   而那里的文字只有 10.5px，若让字号跟着 em 走，齿轮会缩成一个小点）。
+   字形自带的左右空隙与 svg 不同，用 flex 居中 + 半像素微调找视觉重心。 */
+.ico-glyph {
+  width: 1.05em;
+  height: 1.05em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Segoe Fluent Icons', 'Segoe MDL2 Assets';
+  font-size: 1em;
+  font-weight: 400;
+  font-style: normal;
+  line-height: 1;
+  text-indent: .5px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 图标与后面的文字之间的呼吸。ShellUI.icon(name, 'ico-gap') 显式加，
+   也可以靠下面那条 [data-ico] 的规则自动加。 */
+.ico-gap { margin-right: .38em; }
+
+/* 声明式插进来的图标（[data-ico]）默认自带右边距：这些位置绝大多数是纯文本流
+   （button / span / div 的内容），图标和文字之间没有别的间距可用。
+   ★ flex 容器自己有 gap、纯图标按钮没有后续文字 —— 这两种情况由各页面覆盖成 0，
+     不要在每一个用得到的地方手工加 class（漏一处就是"图标贴着字"，很难看但不报错）。 */
+[data-ico] > .ico { margin-right: .38em; }
+
+/* 可折叠箭头：一个 chevron 靠**旋转**表达开合，而不是换字符。
+   这是 Win11 的做法（NavigationView / Expander 都是同一个字形转 180°），
+   好处是转场连续、不会有"两个字跳一下"的突兀感。
+   判据统一放 data-open 上，读状态的探针也读它 —— 免得出现
+   "看着是开的、程序认为是关的"这种两边对不上的情况。 */
+.caret .ico { transition: transform var(--fl-dur) var(--fl-ease-std); }
+.caret[data-open="false"] .ico { transform: rotate(-90deg); }
+.caret[data-open="true"] .ico { transform: rotate(0deg); }
+
+/* ============================================================================
+   ② Win11 Reveal 高亮
+   ----------------------------------------------------------------------------
+   鼠标在控件上移动时，跟随指针位置的一团柔光（Fluent 的 Reveal Highlight，
+   开始菜单磁贴 / 设置页列表项上都是它）。纯 CSS 画不了"跟随"，所以要 JS 把
+   指针坐标写进 --rx / --ry（见 shell-ui.js 的 wireReveal）。
+   没接 JS 时这段完全不起作用（--rx/--ry 缺省即 50%），不会留下半截效果。
+   ========================================================================== */
+.shell-reveal { position: relative; }
+.shell-reveal::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--fl-dur-fast) var(--fl-ease-dec);
+  background: radial-gradient(
+    140px circle at var(--rx, 50%) var(--ry, 50%),
+    rgba(255, 255, 255, .11),
+    rgba(255, 255, 255, 0) 62%);
+}
+.shell-reveal:hover::after { opacity: 1; }
+/* 卡片/列表项里若有自己的定位子元素，别被这层盖住（它有 pointer-events:none，但视觉要留神）*/
+.shell-reveal > * { position: relative; }
+
+/* ============================================================================
+   ③ 滚动条 —— Win11 的细拇指
+   ----------------------------------------------------------------------------
+   做法：轨道留 12px 宽（好抓），拇指用 3px 透明边框 + background-clip 收成约 6px，
+   hover 时加亮。比"直接画一条 6px"好用得多 —— 6px 的命中区太窄，拖不动。
+   ========================================================================== */
+::-webkit-scrollbar { width: 12px; height: 12px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, .16);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, .32); }
+::-webkit-scrollbar-thumb:active { background-color: rgba(255, 255, 255, .44); }
+
+/* ============================================================================
+   ③b 浅色主题下的这两处也必须换色（2026-09-22）
+   ----------------------------------------------------------------------------
+   这两个都是"白画在白上"的典型，浅色下等于消失 —— 跟控件描边是同一类 bug：
+     · 滚动条拇指：白拇指 + 透明轨道 ⇒ 浅色下**完全看不到滚动条**
+       （主人说的"看不到框框"里就有它：外框是滚动容器，滚动条长在框内侧）
+     · Reveal 悬停高光：一层白色径向渐变 ⇒ 浅色下悬停没有反馈
+   浅色里两者都改成"压暗"（与 token 那套同一个方向）。 */
+html[data-theme="light"] ::-webkit-scrollbar-thumb { background-color: rgba(0, 0, 0, .20); }
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, .32); }
+html[data-theme="light"] ::-webkit-scrollbar-thumb:active { background-color: rgba(0, 0, 0, .44); }
+html[data-theme="light"] .shell-reveal::after {
+  background: radial-gradient(
+    140px circle at var(--rx, 50%) var(--ry, 50%),
+    rgba(0, 0, 0, .05),
+    rgba(0, 0, 0, 0) 62%);
+}
+
+/* ============================================================================
+   ④ 焦点环
+   ----------------------------------------------------------------------------
+   只在**键盘操作**时出现（:focus-visible），鼠标点击不出环 —— 这是 Win11 的行为，
+   也是"网页感"和"系统感"最容易分辨的一处。环用 box-shadow 画两层，
+   不占布局（outline 在圆角元素上会切成方的，跟 Win11 的圆角控件对不上）。
+   ========================================================================== */
+:focus-visible {
+  outline: none;
+  box-shadow: var(--fl-focus);
+  border-radius: inherit;
+}
+
+/* ============================================================================
+   ⑤ 材质切换的过场（#shell-mat-veil）
+   ----------------------------------------------------------------------------
+   为什么需要它：DWM 的背板材质（亚克力 / 云母 / 实色）是**瞬间**换的，
+   没有插值 API —— 切的一刹那整个窗口底色直接跳一下，看着很生硬。
+
+   办法：切之前先压一层深色幕布（快，~90ms 加速曲线 → 一瞬间暗下去，
+   跳变就藏在这一下里），宿主切完材质再让幕布缓缓退去（~340ms 减速曲线），
+   「暗下来 → 亮起来时已经是新材质」—— 观感上就是一次柔和的过渡。
+
+   时序完全由 shell-ui.js 的 MatFade 驱动，这里只管两层状态：
+     无 .on  → 透明（常态）
+     有 .on  → 压暗（切换瞬间）
+
+   ★ 实测（2026-09-21，无头 Chromium + tools/win11shot.js）：
+     幕布 1560×940 / position:fixed / z-index:999 / opacity .66 —— 把它临时拉到
+     纯黑再截图，**整屏全黑**（含带 backdrop-filter 的侧栏与标题栏）⇒ 覆盖没问题，
+     不存在"被合成层挡住"这回事。
+
+   ⚠ 验"有没有盖住"**不能**用 document.elementsFromPoint —— 幕布是
+     pointer-events:none，命中测试会**故意跳过**它，那样查出来是"哪都没盖住"，
+     是本轮踩过的假结论（白白怀疑了一轮层叠顺序）。要验就读它的 getBoundingClientRect。
+
+   ⚠ 强度预期：0.66 的暗幕压在**深色**界面上，侧栏这种本来就暗的区域前后只差
+     ~10 个色阶（肉眼几乎看不出），主区因为卡片更亮会明显一些。这是正常的，
+     不是"没生效" —— 判断有没有生效要看主区，或者干脆做纯黑压力测试。
+   ========================================================================== */
+#shell-mat-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;          /* 绝不能挡住点击：它只是一层幕布 */
+  opacity: 0;
+  background: var(--shell-veil-color, #0b0e13);
+  /* 退场：慢、用减速曲线（"亮起来"要柔） */
+  transition: opacity var(--fl-dur-slow) var(--fl-ease-dec);
+}
+#shell-mat-veil.on {
+  opacity: .66;
+  /* 入场：快、用加速曲线（"暗下去"要干脆，跳变才藏得住） */
+  transition: opacity var(--fl-dur-xfast) var(--fl-ease-acc);
+}
+
+/* ============================================================================
+   ⑥ Win11 控件皮肤（按 WinUI 3 的真实数值重画）
+   ----------------------------------------------------------------------------
+   ★ 先纠正一个直觉：**Win11 的按钮没有"材质"**。Mica / 亚克力是**窗口级**效果，
+     到控件这一层只有三件套：
+         填充 = 白 + 低 alpha（微软深色主题给的是 .0605）
+         描边 = 周围 .069、**顶边 .093**（顶上那 1px 更亮 —— 等于"光从上面来"，
+                这是最容易看出"系统感"的一笔，少了它就还是一块网页按钮）
+         状态 = 悬停 .0837；**按下 .0326（比常态还暗）**
+     颜色一律写成"白 + alpha"，不写死灰度值：这样叠在任何材质档上都自然，
+     以后换主题 / 切明暗也不用回来改数字。
+
+   ★ 为什么放在这个文件而不是各页自己的样式表里：
+     两页的加载顺序都在各自样式表**之后**，同优先级的选择器天然由本文件胜出，
+     于是"按钮长什么样"只有**一份**定义，不会两页漂移成两种手感。
+     唯一的例外是 workbench 的 `#top select`（id 选择器优先级更高），
+     它要在 workbench/style.css 里自己补一条 padding-right —— 见那边注释。
+   ========================================================================== */
+
+/* ── 标准按钮 ───────────────────────────────────────────────────────────── */
+button,
+button.btn,
+.tb-btn {
+  background: var(--ct-fill);
+  border: 1px solid var(--ct-line);
+  border-top-color: var(--ct-line-top);
+  border-radius: var(--fl-r-ctl);
+  transition: background var(--fl-dur-fast) var(--fl-ease-std),
+              border-color var(--fl-dur-fast) var(--fl-ease-std),
+              color var(--fl-dur-fast) var(--fl-ease-std);
+}
+button:hover,
+button.btn:hover,
+.tb-btn:hover {
+  background: var(--ct-fill-hover);
+  border-top-color: var(--ct-line-top-hov);
+}
+/* ★ 按下比悬停**更暗**（.0326 < .0605）—— 这是 Win11 手感的来源。
+   网页按钮的惯性写法是"按下更亮"，那样点起来像弹簧，不像系统控件。
+   （浅色下这条仍然成立：hover .035 → active .075，越按越沉。） */
+button:active,
+button.btn:active,
+.tb-btn:active {
+  background: var(--ct-fill-active);
+  border-top-color: var(--ct-line);
+}
+button:disabled,
+button.btn:disabled {
+  background: var(--ct-fill-dis);
+  color: var(--ct-dis-fg);
+  cursor: default;
+}
+
+/* ── 主按钮（accent）─────────────────────────────────────────────────────
+   旧版是「蓝色渐变 + 一圈蓝色投影」，那是网页 App 的写法。
+   Win11 的 accent 按钮是**实心 accent + 顶边一条更亮的描边，不带投影**。
+   一并把旧版那圈 glow 和 hover 的 filter 都撤掉。 */
+button.primary,
+button.btn.primary {
+  background: var(--fl-accent, #4CC2FF);
+  border: 1px solid rgba(255, 255, 255, .08);
+  border-top-color: rgba(255, 255, 255, .20);
+  border-radius: var(--fl-r-ctl);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+button.primary:hover,
+button.btn.primary:hover {
+  background: #66CCFF;              /* 提亮色值而不是叠 filter —— 色相不漂 */
+  filter: none;
+}
+button.primary:active,
+button.btn.primary:active {
+  background: #3AA0D8;
+  color: var(--on-accent);
+}
+button.primary:disabled,
+button.btn.primary:disabled {
+  background: var(--ct-fill-dis);
+  color: var(--ct-dis-fg);
+  filter: none;
+  box-shadow: none;
+}
+
+/* ── 输入框 / 下拉 / 文本域 ──────────────────────────────────────────────
+   Win11 的 TextBox：常态是一条比周围稍亮的底边（"下划线"），
+   聚焦时才把底边换成 2px accent 粗线，同时底色**压暗**成近黑 —— 这两点一起才是
+   系统输入框的样子；只换个边框颜色看着还是网页。 */
+input[type=text],
+input[type=number],
+input[type=search],
+input[type=password],
+input[type=email],
+textarea,
+select {
+  background-color: var(--ct-fill);
+  border: 1px solid var(--ct-line);
+  border-bottom-color: var(--ct-line-top);
+  border-radius: var(--fl-r-ctl);
+  color: var(--text, #ECECEE);
+  transition: background-color var(--fl-dur-fast) var(--fl-ease-std),
+              border-color var(--fl-dur-fast) var(--fl-ease-std);
+}
+input[type=text]:hover,
+input[type=number]:hover,
+input[type=search]:hover,
+input[type=password]:hover,
+input[type=email]:hover,
+textarea:hover,
+select:hover {
+  background-color: var(--ct-fill-hover);
+}
+input[type=text]:focus,
+input[type=number]:focus,
+input[type=search]:focus,
+input[type=password]:focus,
+input[type=email]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--ct-line);
+  border-bottom: 2px solid var(--fl-accent, #4CC2FF);
+  background-color: var(--ct-focus-bg);
+}
+input::placeholder, textarea::placeholder { color: var(--ct-ph); }
+
+/* 工作台的字段行（.field …）自带一套写法，优先级比通用选择器高，
+   要显式再写一遍才吃得上这层皮肤。属性保持一致，只换观感。 */
+.field input[type=text],
+.field input[type=number],
+.field select,
+.vbar .field input,
+.vbar .field select {
+  background-color: var(--ct-fill);
+  border: 1px solid var(--ct-line);
+  border-bottom-color: var(--ct-line-top);
+  border-radius: var(--fl-r-ctl);
+}
+.field input[type=text]:focus,
+.field input[type=number]:focus,
+.field select:focus {
+  border-bottom: 2px solid var(--fl-accent, #4CC2FF);
+  background-color: var(--ct-focus-bg);
+}
+
+/* ── 下拉的自绘箭头 ──────────────────────────────────────────────────────
+   Chromium 自带的那个 select 箭头是它自己画的三角，跟 Win11 的 chevron 不是一回事。
+   这里关掉原生外观、贴一个和图标系统同笔法的 chevron（1.6 描边 / 圆头）。
+   多出来的 padding-right 是给它留位置 —— 这是本文件唯一一处碰盒模型的规则。 */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%23C8CCD4' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.6 8.2 10 12.6l4.4-4.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 13px 13px;
+}
+select:disabled { opacity: .45; }
+/* ★ 2026-09-22：chevron 是 data-URI，**没法用 CSS 变量给它上色**，
+   只能整条再写一份浅色版（描边换成深色 `%232E2E36`）。
+   不补这一条的话，浅色下这个箭头就是"浅灰画在浅灰上"—— 等于没有箭头。 */
+/* 🔴 2026-09-22：除换图外，这里**必须把 repeat/position/size 一并再声明一遍**。
+   起因：workbench/style.css 里 `#top select` / `.field select` 曾用 `background: var(--bg-3)`
+   简写 —— 简写会把这三项重置为初始值（repeat / 0% 0% / auto），且它们的优先级高于本文件
+   的基础 `select` 规则。只补 background-image 的话，浅色下箭头就按 initial 值**平铺满整个框**
+   （主人截图里那排"√√√√√"）。那两处简写已改回 background-color，这里再加一道保险：
+   无论谁重置过，浅色主题下箭头都稳定落在右侧、不重复。 */
+html[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='%232E2E36' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5.6 8.2 10 12.6l4.4-4.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 13px 13px;
+}
+
+/* ── 勾选框 ──────────────────────────────────────────────────────────────
+   accent-color 让浏览器直接按系统强调色画，这是最"原生"的一条路 ——
+   自己画一个伪元素反而会和系统的 focus / 高对比度模式打架。 */
+input[type=checkbox] { accent-color: var(--fl-accent, #4CC2FF); }
+
+/* ── 卡片 / 列表项的圆角与描边 ────────────────────────────────────────────
+   Win11 的卡片是 8px 圆角 + 一层极淡的提亮 + 1px 描边，**不模糊**。
+   旧版卡片用 14~16px 圆角 + blur(30px) 磨砂，是 iOS / 网页卡片的路子，
+   放在原生标题栏下面会显得"软"，也是它跟系统控件对不上的主要原因之一。 */
+.card,
+.mcard,
+.pcard,
+.item {
+  background: var(--cd-fill);
+  border: 1px solid var(--cd-line);
+  border-radius: var(--fl-r-card);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* 拖放区是"虚线框"，属于交互提示不是卡片，只对齐圆角 */
+.drop { border-radius: var(--fl-r-card); }
+
+/* ── 设置行 ──────────────────────────────────────────────────────────────
+   Win11 的设置页是"一行一项、行与行之间一条发丝线"。
+   旧版用 14px 的上下外边距把行分开（没有分隔线），行多的时候像一坨。 */
+.row {
+  align-items: center;
+  margin: 0;
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--cd-row-line);
+}
+.row:last-child { border-bottom: none; }
+.row > label { color: var(--text, #ECECEE); }
+
+/* ── 焦点环改成 Win11 的双色环 ───────────────────────────────────────────
+   深色主题下 WinUI 用的是一条**白色**环 + 外侧 1px 黑边（保证压在任何底色上都看得见）。
+   原来的蓝色单环在这套深色界面上不够显眼，也不像系统。 */
+:root { --fl-focus: 0 0 0 2px #fff, 0 0 0 4px rgba(0, 0, 0, .8); }
+
+/* ============================================================================
+   ⑦ 自绘下拉框（Win11 ComboBox + 浮出菜单）  —— 2026-09-22
+   ----------------------------------------------------------------------------
+   为什么必须自绘：`<select>` 展开时那层弹窗是 **Chromium 自己画的、不在 DOM 里**，
+   CSS 碰不到它 —— 底色、行高、圆角、高亮全是浏览器默认值，所以在壳里永远是
+   「一片系统灰 + 悬停一条亮灰」，跟 Win11 的浮出菜单完全不是一回事。
+   触发器上那个"白框框"同理：那是浏览器给表单控件画的**焦点矩形**，不是我们的样式。
+
+   ★ 形态照 WinUI 3 的真实 ComboBox / MenuFlyout，逐项对：
+     触发器 —— 32px 高、4px 圆角（`--fl-r-ctl`）、文字左对齐、右侧 chevron；
+               展开时 chevron **翻转 180°**（不是换成另一张图）。
+     焦点   —— WinUI 的 ComboBox **不画方框**，而是**底边一条 2px 主色线**。
+               所以这里 `outline:none` + 自绘 `::after` 底线（键盘聚焦与展开时都亮）。
+     浮出层 —— 8px 圆角（`--fl-r-flyout`）、独立浮层、5px 内边距、一层柔和投影；
+               行 32px、圆角 4px、悬停给一层浅填充；
+               选中行 = 浅填充 + 左侧一条 3×16 主色竖条（WinUI 的选择标记）。
+     动效   —— 展开走 decelerate 220ms（`--fl-dur`）、收起走 accelerate 100ms
+               （`--fl-dur-xfast`）；位移从 **-8px** 起 —— WinUI 的浮层是"从上一点
+               落下来"，不是缩放弹跳（缩放是 Win10 的老观感）。
+     空间不足 —— 自动翻到触发器上方，并贴住视口右缘。
+
+   ⚠ 本段属于"独立浮层"例外（另一个是 #shell-mat-veil）：菜单必须挂在 body 下、
+     用 position:fixed，否则会被卡片/滚动容器的 overflow 裁掉。
+   ⚠ 深色那一组是 Win11 **深色**主题的取值；浅色单独给一档（见下面的覆盖块）——
+     别用"白 alpha"糊，那正是前面 ② 段记过的那个看不见控件的 bug。
+   ========================================================================== */
+:root {
+  --fl-flyout:        #2C3038;                      /* 浮出层表面：比卡片高一档 */
+  --fl-flyout-line:   rgba(255, 255, 255, .09);
+  --fl-flyout-shadow: 0 8px 16px rgba(0, 0, 0, .28), 0 0 2px rgba(0, 0, 0, .24);
+  --fl-opt-hover:     rgba(255, 255, 255, .065);    /* 悬停行 */
+  --fl-opt-on:        rgba(255, 255, 255, .045);    /* 选中行（比悬停更含蓄） */
+}
+html[data-theme="light"] {
+  --fl-flyout:        #FBFBFD;
+  --fl-flyout-line:   rgba(0, 0, 0, .10);
+  --fl-flyout-shadow: 0 8px 16px rgba(0, 0, 0, .14), 0 0 2px rgba(0, 0, 0, .10);
+  --fl-opt-hover:     rgba(0, 0, 0, .05);
+  --fl-opt-on:        rgba(0, 0, 0, .032);
+}
+
+.dd {
+  position: relative;                 /* 给底边焦点线留定位基准 */
+  display: inline-flex; align-items: center; gap: 8px;
+  box-sizing: border-box;
+  min-width: 104px; height: 32px; padding: 0 8px 0 12px;
+  border: 1px solid var(--ct-line);
+  border-radius: var(--fl-r-ctl);
+  background: var(--ct-fill);
+  color: var(--text, #ECECEE);
+  font: inherit; font-size: 13px; line-height: 1; text-align: left;
+  /* Win11 的 ComboBox 用的是**箭头**光标（不是手型）—— 这里照抄，别自作主张改手型 */
+  cursor: default;
+  transition: background var(--fl-dur-fast) var(--fl-ease-std),
+              border-color var(--fl-dur-fast) var(--fl-ease-std);
+}
+.dd:hover { background: var(--ct-fill-hover); border-color: var(--ct-line-top-hov); }
+.dd:active { background: var(--ct-fill-active); }
+.dd.open,
+.dd[aria-expanded="true"] { background: var(--ct-fill-hover); }
+/* 🔴 WinUI 的聚焦表达是「底边一条主色线」，不是一圈方框 —— 主人看到的"框框"是浏览器
+   给 <select> 画的焦点矩形，自绘之后必须一个都不留（连 outline 也要显式关掉）。 */
+.dd:focus { outline: none; box-shadow: none; }
+.dd::after {
+  content: ''; position: absolute; left: 3px; right: 3px; bottom: 0; height: 2px;
+  border-radius: 1px; background: transparent;
+  transition: background var(--fl-dur-fast) var(--fl-ease-std);
+}
+.dd.open::after,
+.dd:focus-visible::after { background: var(--accent, #4CC2FF); }
+.dd-lb { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-h { color: var(--text-dim, #9A9AA2); }
+.dd-ch {
+  flex: 0 0 auto; display: inline-flex; width: 12px; height: 12px;
+  color: var(--text, #ECECEE);
+  transition: transform var(--fl-dur) var(--fl-ease-std);
+}
+.dd-ch svg { display: block; width: 100%; height: 100%; }
+.dd.open .dd-ch { transform: rotate(180deg); }
+
+.dd-menu {
+  position: fixed; z-index: 120;        /* 高于 #overlay(80)/#ibModal(99)，低于幕布(999) */
+  box-sizing: border-box;
+  min-width: 104px; max-width: 380px; max-height: 300px;
+  padding: 5px; overflow-x: hidden; overflow-y: auto;
+  background: var(--fl-flyout);
+  border: 1px solid var(--fl-flyout-line);
+  border-radius: var(--fl-r-flyout);
+  box-shadow: var(--fl-flyout-shadow);
+  animation: dd-in var(--fl-dur) var(--fl-ease-dec) both;
+  transform-origin: top center;
+}
+.dd-menu.up { transform-origin: bottom center; animation-name: dd-in-up; }
+.dd-menu.closing { animation: dd-out var(--fl-dur-xfast) var(--fl-ease-acc) both; }
+@keyframes dd-in    { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+@keyframes dd-in-up { from { opacity: 0; transform: translateY(8px);  } to { opacity: 1; transform: none; } }
+@keyframes dd-out   { from { opacity: 1; } to { opacity: 0; } }
+
+.dd-opt {
+  position: relative;
+  display: flex; align-items: center;
+  min-height: 32px; padding: 6px 10px 6px 26px;
+  border-radius: var(--fl-r-ctl);
+  font-size: 13px; line-height: 1.35;
+  color: var(--text, #ECECEE);
+  cursor: default; user-select: none;
+  transition: background var(--fl-dur-fast) var(--fl-ease-std);
+}
+/* 悬停与键盘"当前行"共用一套高亮；选中行单独一档更含蓄的底 + 左侧主色竖条 */
+.dd-opt:hover,
+.dd-opt.act { background: var(--fl-opt-hover); }
+.dd-opt.on { background: var(--fl-opt-on); }
+.dd-bar {
+  position: absolute; left: 8px; top: 50%; width: 3px; height: 16px; margin-top: -8px;
+  border-radius: 1.5px; background: transparent;
+  transition: background var(--fl-dur-fast) var(--fl-ease-std);
+}
+.dd-opt.on .dd-bar { background: var(--accent, #4CC2FF); }
+.dd-tx { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dd-opt .dd-h { color: var(--text-dim, #9A9AA2); font-size: 12px; }
+
+/* ── 尺度档：基础 .dd 是 32px（设置页 / 关于页那档）。工作台的表单密得多，要小两档 ──
+   `.dd-sm` = 检查器与顶栏（**26px**，正是那里原来那个 <select> 的度量：
+              实测 height 26 / font 12.5 / radius 4 / padding 4·24·4·7）；
+   `.dd-xs` = 区间行（③b / ⑤d，**20px / 11px 字**，跟 .rtime 里的小输入同一行高）。
+   🔴 只改**度量**（高・字・圆角・内边距・箭头尺寸），配色／动效／底边焦点线一律沿用 .dd 本体 ——
+      于是深浅主题、减动效偏好都自动跟着走，不用在这里再写一套。 */
+.dd.dd-sm { min-width: 0; height: 26px; padding: 0 7px; gap: 6px; font-size: 12.5px; border-radius: 4px; }
+.dd.dd-xs { min-width: 0; height: 20px; padding: 0 5px; gap: 4px; font-size: 11px; border-radius: 4px; }
+.dd.dd-xs .dd-ch { width: 10px; height: 10px; }
+/* 菜单在 body 下、不是 .dd 的后代，所以尺度档也得写到菜单上（给同一个 opts.size）。 */
+.dd-menu.dd-sm .dd-opt { min-height: 24px; padding: 4px 8px 4px 22px; font-size: 12.5px; }
+.dd-menu.dd-sm .dd-bar { left: 6px; width: 2px; height: 13px; margin-top: -6.5px; }
+.dd-menu.dd-xs .dd-opt { min-height: 20px; padding: 3px 8px 3px 18px; font-size: 11px; }
+.dd-menu.dd-xs .dd-bar { left: 5px; width: 2px; height: 11px; margin-top: -5.5px; }
+
+/* 被自绘触发器**接管**的原生控件（opts.keepMount）：留着当数据源，但完全不参与布局与交互。
+   🔴 别用 display:none —— 外面有代码按它量 offsetWidth / clientHeight，一隐藏就全归零；
+      也用 !important，因为上下文规则（如 `.region .rtime select.xkunit{width:52px}`）优先级更高。 */
+.dd-src {
+  position: absolute !important;
+  width: 1px !important; height: 1px !important;
+  margin: 0 !important; padding: 0 !important; border: 0 !important;
+  opacity: 0 !important; pointer-events: none !important; overflow: hidden !important;
+}
+
+/* 触发器与设置行里的落位：宽度由调用方给（材质那个走行内 width:100%;max-width:340px），
+   这里只保证它不被 flex 压扁。 */
+.appear-row > .dd { flex: 0 0 auto; }
+
+/* 用户在系统里关掉了动画效果 ⇒ 一切过渡归零（无障碍设置优先于观感） */
+@media (prefers-reduced-motion: reduce) {
+  .dd, .dd-ch, .dd::after, .dd-opt, .dd-bar { transition: none; }
+  .dd-menu, .dd-menu.closing { animation: none; }
+  #shell-mat-veil,
+  #shell-mat-veil.on { transition: none; }
+  .caret .ico { transition: none; }
+  /* ★ 2026-09-22：指示条的"压扁→弹开"也归零。
+     shell-ui.js 里另有 REDUCE 分支直接落位（两层都做，因为 JS 那份才管得住
+     syncNavInd 逐段写的内联 transition —— 内联的优先级比这里高，光靠 CSS 压不住）。 */
+  #nav-ind { transition: none !important; }
+}

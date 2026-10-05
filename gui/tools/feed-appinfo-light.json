@@ -1,0 +1,13 @@
+{
+  "type": "appinfo",
+  "data": {
+    "appearance": "light",
+    "material": "mica",
+    "materials": [
+      { "name": "acrylic", "label": "Acrylic" },
+      { "name": "mica", "label": "Mica" },
+      { "name": "tabbed", "label": "Tabbed" },
+      { "name": "solid", "label": "Solid" }
+    ]
+  }
+}

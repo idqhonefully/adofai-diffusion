@@ -1,0 +1,313 @@
+/* ==========================================================================
+   ADOFAI 谱面生成器 · 「工作台 / 亚克力」皮肤        skin-workbench.css
+   v1.0 · 2026-09-19
+   --------------------------------------------------------------------------
+   接入（只改 1 行）—— 在 index.html 里让本文件排在 style.css **之后**：
+       <link rel="stylesheet" href="style.css" />
+       <link rel="stylesheet" href="skin-workbench.css" />   ← 新增
+   不碰任何 JS / HTML 结构 / 元素 id，所有 e2e 依赖的 id 原样保留。
+
+   本文件做三件事：
+     1) 重定义 :root 里的旧令牌（沿用原变量名，原 style.css 自动跟着变）
+     2) 加「亚克力层」：页面底色透明 + 面板半透明 + backdrop-filter，
+        让窗口的系统材质（Electron backgroundMaterial:'acrylic'）透出来
+     3) 统一控件观感：按钮 / 输入 / 标签页 / 胶囊 chip / 参数分组 /
+        分段行 region / 滚动条 / 弹窗 / toast
+
+   与窗口底色的两种状态都兼容，不需要任何 JS 开关：
+     · 材质生效（Win11 + 系统「透明效果」开）→ 面板 28% 透明度处透出磨砂
+     · 材质不可用（Win10 / 关掉透明效果）→ 面板就叠在窗口底色上，是纯净深色主题
+   画布区（#stage / #tlwrap / #ovwrap）**保持不透明实底** —— 预览要清晰，不能糊。
+   ========================================================================== */
+
+:root {
+  /* ---- 复用原有变量名：改这里，原 style.css 里所有引用同步生效 ---- */
+  --bg:        #0e1116;                    /* 深底（输入框、列表底） */
+  --panel:     rgba(24, 30, 40, .72);      /* 面板：半透明 → 让材质透出来 */
+  --panel2:    rgba(30, 37, 49, .85);      /* 次级面板（标签栏 / 播放条） */
+  --line:      rgba(255, 255, 255, .08);
+  --line2:     rgba(255, 255, 255, .14);
+  --ink:       #d7dde6;                    /* 主文字 */
+  --ink2:      #9fb0c4;                    /* 标签文字 */
+  --ink3:      #7b8899;                    /* 提示文字 */
+  --ink4:      #5b6675;                    /* 极弱文字 */
+  --accent:    #4fc3f7;                    /* 青蓝高亮（原 #2f5d80 太闷） */
+  --accent2:   #3a8db0;                    /* 高亮的边框/描边变体 */
+  --gold:      #f0a830;
+  --ok:        #56d364;
+  --bad:       #f85149;
+
+  /* ---- 本皮肤新增（原 style.css 不会用到，仅本文件内生效） ---- */
+  --bg-2:      #151a22;
+  --bg-3:      #1b212b;                    /* 控件底（按钮/输入） */
+  --radius:    8px;
+  --top-h:     46px;
+  --blur:      14px;                       /* 面板磨砂半径 */
+
+  color-scheme: dark;                      /* 原生滚动条/控件走深色 */
+}
+
+/* ══════════════ 1. 亚克力层 ══════════════ */
+/* ★ 关键：页面自己的底色必须透明，否则会把系统材质整个盖掉
+   （Electron 把 backgroundMaterial 画在页面**之后**，页面不刷底才看得见）。
+   ⚠️ 若窗口底是不透明深色（材质不可用时的降级），这些半透明面板会叠在它上面，
+      观感仍是统一的深色主题，不会出现"透了个寂寞"的脏底。 */
+html { background: transparent; }
+body { background: transparent; font: var(--font)/1.45 "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif; }
+
+/* 外壳与"非画布"面板：半透明 + 磨砂，材质在这里透出来 */
+#top, .pane, #tabs, #viewbars, .vbar, #playbar, #ovwrap, #report,
+.float .fhead, #bridge, #lmbanner, #lmhud {
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+}
+#top      { background: var(--panel); }
+.pane     { background: var(--panel); color: var(--ink); }
+#tabs     { background: var(--panel2); }
+#viewbars { background: var(--panel2); }
+#playbar  { background: var(--panel2); }
+
+/* 画布容器：不透明实底（预览要清晰）+ 底色对齐工作台 */
+#center { background: transparent; }
+#stage  { background: #0d1117; }
+#tlwrap { background: #0f151c; }
+#ovwrap { background: var(--panel2); }
+
+/* 顶栏：46px 高、上下留白，和"夜色 + 青蓝"那套对齐 */
+#top {
+  height: var(--top-h); flex: 0 0 var(--top-h);
+  padding: 0 12px; gap: 10px;
+  border-bottom: 1px solid var(--line);
+}
+#top .brand   { font-weight: 700; letter-spacing: .5px; white-space: nowrap; }
+#top .ver     { color: var(--ink4); font-size: 11px; white-space: nowrap; }
+#top .badge   { font-size: 14px; }
+#top .srcbadge {
+  background: var(--bg-3); border: 1px solid var(--line2); border-radius: 999px;
+  padding: 2px 9px; font-size: 11.5px; color: var(--ink3); white-space: nowrap;
+}
+
+/* ══════════════ 2. 区块标题 / 滚动条 ══════════════ */
+.zhead {
+  padding: 6px 10px; font-size: 12px; font-weight: 600; color: var(--accent);
+  background: rgba(255, 255, 255, .03);
+  border-bottom: 1px solid var(--line);
+  overflow: hidden; white-space: nowrap;
+}
+.zbody { padding: var(--pad) 10px; }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .12); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .2); }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ══════════════ 3. 控件 ══════════════ */
+button {
+  background: var(--bg-3); color: var(--ink);
+  border: 1px solid var(--line2); border-radius: 6px;
+  padding: 5px 11px; cursor: pointer; white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+button:hover { background: #232c39; border-color: var(--accent); }
+button.primary {
+  background: linear-gradient(180deg, #2a6d8f, #1f5573);
+  border-color: #3a8db0; color: #eaf6ff;
+}
+button.primary:hover { background: linear-gradient(180deg, #3180a6, #235f80); filter: brightness(1.08); }
+button.ghost { background: transparent; }
+button.ghost:hover { background: rgba(255, 255, 255, .05); }
+button.mini { padding: 3px 8px; font-size: 11.5px; }
+
+select, input[type=number], input[type=text], input[type=search], textarea {
+  background: var(--bg-3); color: var(--ink);
+  border: 1px solid var(--line2); border-radius: 6px;
+  padding: 4px 7px; height: auto; min-width: 0;
+}
+input:focus, select:focus, textarea:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(79, 195, 247, .18);
+}
+input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+input:disabled, select:disabled, button:disabled { opacity: .45; cursor: default; }
+
+/* ══════════════ 4. 标签页 / 工具条 ══════════════ */
+#tabs { border-bottom: 1px solid var(--line); padding: 5px 8px; gap: 4px; }
+.tab {
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  color: var(--ink3); padding: 4px 12px;
+}
+.tab:hover  { color: var(--ink); background: rgba(255, 255, 255, .04); }
+.tab.active {
+  color: #eaf6ff; background: rgba(79, 195, 247, .16);
+  border-color: rgba(79, 195, 247, .4);
+}
+#tab-hint { color: var(--ink4); font-size: 11px; }
+
+/* 工具条（2026-09-19 修正）：**只改外观，绝不碰他的换行与宽度**。
+   v1 皮肤在这里把 `.vbar` 改成「flex-wrap:nowrap + overflow-x:auto + 控件 104px」，
+   那是照搬我们自己工作台的布局，属越界 —— 后果（已实测）：
+     · 提示文字被压成 131px 而文字溢出可见（`white-space:nowrap` 不让它折行）
+     · 窄窗口下工具条总宽 > 视口，药丸被推出可视区，得横向滚动才点得到
+     · `.field.wide > label` 被改成不换行，宽字段的标题不再独占一行
+   所以这里全部撤销，只留颜色 / 字号；控件宽度沿用他的 76px。
+   唯一的例外是 `.hint` 允许「收缩 + 省略号」：长文案不再撑爆工具条，
+   完整文案本来就在它的 `title` 里（悬停可见），不会丢信息。 */
+#viewbars { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.vbar {
+  font-size: 11.5px; color: var(--ink3);
+  padding: 5px 10px;                       /* 他的 6px 10px 微调，仅行高观感 */
+}
+.vbar .hint {
+  color: var(--ink4);
+  flex: 0 1 auto; min-width: 0;            /* 允许收缩 */
+  /* `white-space:nowrap` 是 `text-overflow:ellipsis` 生效的**前提**：
+     少了它，长文案会在盒子里自己折成两行（工具条跟着变高、药丸被挤到第二行）。
+     实测：1100px 下带上它 → 工具条 31px 单行；不带 → 42px 两行。 */
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.vbar .field > label { color: var(--ink3); }
+
+/* ══════════════ 5. 分隔条 ══════════════ */
+.split { background: transparent; }
+.split[data-split="tl"], .split[data-split="bottom"] { background: var(--line); }
+.split:hover, .split.on { background: var(--accent); }
+
+/* ══════════════ 6. 浮窗 ══════════════ */
+.float {
+  background: var(--panel2); border: 1px solid var(--line2); border-radius: 10px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .5);
+  backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur));
+}
+.float .fhead {
+  background: rgba(255, 255, 255, .03); border-bottom: 1px solid var(--line);
+  border-radius: 9px 9px 0 0; color: var(--accent); font-weight: 600;
+  padding: 6px 9px;
+}
+.float .grip { background: linear-gradient(135deg, transparent 45%, var(--ink4) 45%, var(--ink4) 55%, transparent 55%); }
+.float .x:hover { color: var(--bad); }
+
+/* ══════════════ 7. 播放条 ══════════════ */
+#playbar { border-top: 1px solid var(--line); }
+#playbar input[type=range] { accent-color: var(--accent); height: 4px; }
+#lbl-time { font-variant-numeric: tabular-nums; color: var(--ink3); }
+
+/* ══════════════ 8. 报告带 ══════════════ */
+#report { border-top: 1px solid var(--line); background: var(--panel); }
+#report .zbody { padding: 5px 10px; }
+.chips { gap: 6px; padding: 4px 0; }
+.chip {
+  background: var(--bg-3); border: 1px solid var(--line2); border-radius: 999px;
+  padding: 2px 10px; font-size: 11.5px; color: var(--ink3);
+}
+.chip:hover { border-color: var(--accent); color: #eaf6ff; }
+.chip b { color: var(--ink); }
+.chip.warn { border-color: rgba(240, 168, 48, .5); color: var(--gold); }
+.chip.warn b { color: var(--gold); }
+.chip.ok b { color: var(--ok); }
+.chip.dead { opacity: .5; cursor: default; }
+.status { color: var(--ink2); white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
+.timing, .warnings { font-family: Consolas, "Microsoft YaHei UI", monospace; }
+.warnings { color: var(--gold); }
+#detail {
+  margin-top: 6px; border: 1px solid var(--line2); border-radius: 6px;
+  background: rgba(13, 18, 24, .72); font-size: 11.5px; color: var(--ink2); line-height: 1.7;
+}
+#detail .k { color: var(--gold); }
+#more > summary { color: var(--ink3); }
+#more > summary::before { content: '▸ '; }
+#more[open] > summary::before { content: '▾ '; }
+.badge2 { color: var(--gold); }
+
+/* ══════════════ 9. 参数分组（检查器 / 左栏分节） ══════════════ */
+section.grp {
+  margin-bottom: 8px; border: 1px solid var(--line); border-radius: var(--radius);
+  overflow: hidden;
+}
+section.grp > h4 {
+  padding: 6px 9px; font-size: 12px; font-weight: 600; color: var(--accent);
+  background: rgba(255, 255, 255, .03);
+}
+section.grp > h4:hover { background: rgba(255, 255, 255, .06); color: var(--accent); }
+section.grp > h4 .caret { color: var(--ink4); }
+section.grp > .body { padding: 8px 9px; gap: 7px; }
+
+.subhead { color: var(--ink3); font-size: 11.5px; font-weight: 600; }
+.field > label { color: var(--ink2); font-size: 12px; }
+.field .unit  { color: var(--ink4); }
+.field .note  { color: var(--ink4); }
+.info {
+  color: var(--ink4); font-size: 11px; line-height: 1.5;
+  background: rgba(79, 195, 247, .06); border: 1px solid rgba(79, 195, 247, .18);
+  border-radius: 6px; padding: 6px 8px;
+}
+.hint { color: var(--ink4); }
+
+/* 可选：想让参数也变成"标签在上、控件在下"（工作台检查器的排法），
+   给 <body> 加 data-skin="fields-column" 即可。默认保持原「标签在左」。 */
+body[data-skin~="fields-column"] .field { display: flex; flex-direction: column; gap: 3px; align-items: stretch; }
+body[data-skin~="fields-column"] .field > label { flex: 0 0 auto; font-size: 11.5px; color: var(--ink3); }
+body[data-skin~="fields-column"] .field > .ctl { width: 100%; }
+body[data-skin~="fields-column"] .field input, body[data-skin~="fields-column"] .field select { width: 100%; }
+
+/* 音轨列表 */
+.list { border: 1px solid var(--line2); border-radius: 6px; background: rgba(14, 17, 22, .5); }
+.list label { border-radius: 5px; padding: 2px 4px; }
+.list label:hover { background: rgba(255, 255, 255, .04); }
+.list label.sel { background: rgba(79, 195, 247, .16); }
+.list .t { color: var(--ink); }
+.list .drum { color: var(--gold); }
+
+/* 区间 / 分段行（③b 采bpm、⑤d 演出分段…） */
+.region {
+  border: 1px solid var(--line2); border-left: 3px solid var(--accent);
+  border-radius: 6px; background: var(--bg-3); padding: 5px 7px;
+}
+.region.sel { border-color: var(--accent); background: rgba(79, 195, 247, .08); }
+.region .rname { color: var(--ink); }
+.region .rtime { color: var(--ink3); }
+.region .rdel:hover { color: var(--bad); }
+
+/* BDG 桥面板 */
+#bridge { border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 255, 255, .02); }
+#bridge .fhead, #bridge .bhead { background: rgba(255, 255, 255, .03); }
+#bridge .burl { color: var(--ink4); font-family: Consolas, "Microsoft YaHei UI", monospace; }
+#bridge .bdot.on { color: var(--ok); }
+#bridge .bdot.warn { color: var(--gold); }
+
+/* ══════════════ 10. 进度 / 弹窗 / toast ══════════════ */
+#progress { background: rgba(0, 0, 0, .45); }
+.pbar { background: var(--bg-3); border-radius: 999px; }
+#pfill { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.ptext { color: var(--ink3); }
+#modal  { background: rgba(0, 0, 0, .5); }
+#modal .card { background: var(--panel2); border: 1px solid var(--line2); border-radius: 12px;
+               backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur)); }
+#modal pre { color: var(--ink2); }
+#toast {
+  background: rgba(20, 26, 34, .95); border: 1px solid var(--line2); color: var(--ink);
+  border-radius: var(--radius); padding: 8px 16px;
+  backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur));
+}
+
+/* ══════════════ 11. Shift+M 布局编辑模式 / HUD ══════════════ */
+#lmbanner { background: rgba(20, 26, 34, .96); border: 1px solid var(--line2); border-radius: var(--radius); }
+#lmbanner kbd { background: var(--bg-3); border: 1px solid var(--line2); border-radius: 4px; }
+#lmhud { background: rgba(13, 17, 23, .92); border: 1px solid var(--line2); border-radius: 6px; color: var(--ink2); }
+body.layoutmode .pane { outline-color: var(--accent); }
+body.layoutmode .zbody, body.layoutmode .fbody { opacity: .5; }
+.xk-hud {
+  background: rgba(13, 17, 23, .78); border: 1px solid var(--line2);
+  border-radius: 6px; color: var(--ink2);
+}
+.xk-hud b { color: var(--gold); }
+
+/* 顶部是半透 + 磨砂时，最大化/拖动的观感与工作台一致（无边框模式才需要，
+   有系统标题栏时本段无副作用） */
+#top    { -webkit-app-region: no-drag; }
+
+/* 面板磨砂不可用时（老 Chromium / 软件渲染）退化成更实的底，避免"透得发花" */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root { --panel: rgba(24, 30, 40, .94); --panel2: rgba(30, 37, 49, .96); }
+}

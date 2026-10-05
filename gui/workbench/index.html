@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<!--
+  ADOFAI Studio · 工作台（自有 Mica 壳 · 重新排版移植）
+  ----------------------------------------------------------------
+  布局：顶栏 + 左「来源与段」+ 中「四标签预览 + 段带 + 播放条 + 全曲条」
+        + 右「schema 驱动检查器」+ 底「报告带」。
+  预览不重造：黑盒复用 vendor/adofai-player.js（谱面渲染引擎）+
+             views/{roll,path,falling,overview,band}.js（五个视图类）+
+             __dsh_bridge.js（WebView2 宿主桥）；业务派生全在 sidecar。
+  ★ 必须在 app.js 之前同步加载桥（api.js 不在本壳内；app.js 自己内联 fetch 客户端，
+    但 __dsh_bridge.js 先把 window.dsh.base 固化好，app.js 才能拿到同源网关基址）。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' http://127.0.0.1:*; connect-src 'self' http://127.0.0.1:*" />
+<title>ADOFAI 工作台</title>
+<link rel="stylesheet" href="style.css" />
+<!-- Win11/Fluent 观感层（图标盒模型 / 动效曲线 / 滚动条 / 焦点环 / 材质过场）。
+     ★ 必须排在 style.css **之后**：两边同为作者样式，同优先级时后者胜出，
+       颠倒过来这些增强会被工作台自己的旧写法压回去。 -->
+<link rel="stylesheet" href="../shell-ui.css" />
+<!-- ★ 2026-09-28：进工作台时整页从右滑入，与导入页「前往工作台」左滑离场衔接成连贯的左移过渡。 -->
+<style>
+  #app { animation: wb-enter .34s var(--fl-ease-dec, cubic-bezier(.1,.9,.2,1)) both; }
+  @keyframes wb-enter { from { opacity: 0; transform: translateX(56px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { #app { animation: none; } }
+
+  /* ★★ 2026-10-05 工作台「退出实色(solid)档控件配色」（主人裁定：还原，工作台保持夜色青蓝）
+     ------------------------------------------------------------------------------
+     主人截图：「这个里面的按钮啥的颜色怎么也给改了啊…赶紧还原一下，现在看着好难受」。
+     病根不在工作台自己，而在「solid 档的控件配色是**全站生效**的」：
+       · shell-ui.css 的 `html[dark][solid]` 块把 --ct-fill 定成**不透明**的 #3e3e3e、
+         --cd-fill 定成 #2f2f2f —— 这组值是给**导入页**配的（那边有配套的实色底，
+         控件坐在 #2f2f2f 上刚好是 Win11 实色档的样子，所以好看）；
+       · 工作台的面板走的是它自己的「夜色青蓝」（--panel: rgba(24,30,40,.72)，
+         solid 下实测 #181D24），并不吃那组实色底 ⇒ 一堆 #3e3e3e 灰控件坐在蓝面板上，
+         看上去就像"按钮的颜色被人改了"。云母/亚克力/tabbed 三档没有这个块，所以只有 solid 犯病。
+     ⇒ 工作台明确表态：**不参与 solid 的控件/卡片配色**，把这组 token 钉回 :root 半透档的原值，
+       让它在四种材质下观感一致（夜色青蓝 + 白 alpha 控件/卡片）。
+     ⚠ 必须写在这里（shell-ui.css 的 <link> **之后**）：同优先级靠**来源顺序**胜出。
+       写进 style.css 会被 shell-ui.css 压回去（那个 <link> 排在 style.css 后面）。
+     ⚠ 别把它改成 --ct-fill:#3e3e3e 之类的实色值 —— 那是导入页那一档的配方，
+       工作台的底不是实色底，套上去就是主人报的"灰控件坐蓝面板"。
+     ⚠ 想反过来（让工作台也整套吃 solid 实色档）就先删掉这一段，再把 style.css 里那份
+       已被注释掉的 [SOLID-OVERRIDE] 块挪到 :root **外面**（它原先写在 :root 里，是死的）。 */
+  html[data-theme="dark"][data-material="solid"] {
+    --ct-fill:         rgba(255, 255, 255, .0605);
+    --ct-fill-hover:   rgba(255, 255, 255, .0837);
+    --ct-fill-active:  rgba(255, 255, 255, .0326);
+    --ct-fill-dis:     rgba(255, 255, 255, .0419);
+    --ct-line:         rgba(255, 255, 255, .069);
+    --ct-line-top:     rgba(255, 255, 255, .093);
+    --ct-line-top-hov: rgba(255, 255, 255, .11);
+    --ct-dis-fg:       rgba(255, 255, 255, .36);
+    --ct-ph:           rgba(255, 255, 255, .38);
+    --ct-focus-bg:     rgba(0, 0, 0, .30);
+    --cd-fill:         rgba(255, 255, 255, .035);
+    --cd-line:         rgba(255, 255, 255, .075);
+    --cd-row-line:     rgba(255, 255, 255, .06);
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ───────────── 顶栏（桥会往里插「← 导入」与窗口控制） ───────────── -->
+  <div id="top">
+    <b class="brand">ADOFAI 工作台</b>
+    <span class="ver" id="ver"></span>
+    <span class="badge" id="health" title="sidecar 状态" data-ico="dot"></span>
+    <span class="srcbadge" id="src-badge">未加载</span>
+    <span class="grow"></span>
+    <span class="hint">密度</span>
+    <select id="density">
+      <option value="compact">紧凑</option>
+      <option value="normal" selected>标准</option>
+      <option value="loose">宽松</option>
+    </select>
+    <button id="btn-rebuild" class="primary" data-ico="refresh">重新生成</button>
+    <button id="btn-export" data-ico="export">导出谱面…</button>
+    <button id="btn-about" class="ghost" title="参数说明 / 关于 (?)" data-ico="info"></button>
+  </div>
+
+  <!-- ───────────── 中：工作区 ───────────── -->
+  <div id="work">
+
+    <!-- 左：来源与段 -->
+    <div id="left" class="pane">
+      <div class="zhead" data-ico="layers">来源与段
+        <span class="grow"></span><span class="hint">双击标题收起</span></div>
+      <div class="zbody" id="panel-left"></div>
+    </div>
+
+    <div class="split" data-split="left" title="拖我 = 改左栏宽度（双击复位）"></div>
+
+    <!-- 中：四标签预览 -->
+    <div id="center">
+      <div id="tabs">
+        <button class="tab active" data-tab="chart" data-ico="star">谱面预览</button>
+        <button class="tab" data-tab="roll" data-ico="grid">钢琴卷帘</button>
+        <button class="tab" data-tab="path" data-ico="path">谱面路径</button>
+        <button class="tab" data-tab="falling" data-ico="falling">4K 下落式</button>
+        <span class="grow"></span>
+        <span class="hint" id="tab-hint" title=""></span>
+      </div>
+
+      <div id="stage">
+        <div id="cv-adofai" class="view active"></div>
+        <canvas id="cv-roll" class="view"></canvas>
+        <canvas id="cv-path" class="view"></canvas>
+        <canvas id="cv-falling" class="view"></canvas>
+        <!-- 预览状态提示：只在「加载中 / 失败」时出现一行小字，不遮画布、不占版面 -->
+        <div id="ph-note" class="hidden">
+          <span id="ph-text"></span>
+          <button id="ph-retry" class="hidden" data-ico="refresh">重试</button>
+        </div>
+      </div>
+
+      <div id="viewbars">
+        <div class="vbar" data-for="chart" id="vbar-chart"></div>
+        <div class="vbar" data-for="roll" id="vbar-roll">
+          <span class="hint">滚轮=缩放 / Ctrl+滚轮=音高 / Shift+滚轮=平移 / 左键拖动 / 中键=跳转</span>
+        </div>
+        <div class="vbar" data-for="path" id="vbar-path"></div>
+        <div class="vbar" data-for="falling" id="vbar-falling"></div>
+      </div>
+
+      <div class="split" data-split="tl" title="拖我 = 改段带高度"></div>
+      <div id="tlwrap"><canvas id="cv-band"></canvas></div>
+
+      <div id="playbar">
+        <button id="btn-play" data-ico="play">播放</button>
+        <input id="slider" type="range" min="0" max="1000" value="0" step="1" />
+        <span id="lbl-time">0:00.00 / 0:00.00</span>
+        <span id="audio-src" class="hint"></span>
+        <label>音量</label>
+        <input id="vol" type="range" min="0" max="100" value="70" step="1" />
+      </div>
+
+      <div id="ovwrap"><canvas id="cv-overview"></canvas></div>
+    </div>
+
+    <!-- 右：检查器（③b 采bpm / 大直线等所有组都在这里，按 schema 顺序纵向渲染，不另开面板） -->
+    <!-- ★ 这一条分隔条原来漏搬了（原版 studio 有 left/tl/right/bottom 四条）⇒ 右栏既没有
+         分隔线、也没有可拖的抓手。拖动实现见 app.js 的 bindSplits()。 -->
+    <div class="split" data-split="right" title="拖我 = 改检查器宽度（双击复位）"></div>
+    <div id="rcol">
+      <div id="right" class="pane">
+        <div class="zhead" data-ico="settings">检查器
+          <span class="grow"></span><span class="hint" id="selname">未选中</span></div>
+        <div class="zbody" id="panel">
+          <input type="text" id="psearch" placeholder="搜索参数（中文名 / key）" />
+          <div id="groups"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────── 底：报告带（可收起 / 可调高） ───────────── -->
+  <!-- ★ 两条分隔条语义（对照原版 studio 的 data-split="bottom"）：
+       报告带**默认收起**，只剩标题栏那一行摘要；点标题栏的箭头展开，
+       或拖下面这条分隔条调高度（双击复位）。收起时分隔条自动隐藏。 -->
+  <div class="split" data-split="report" id="split-report"
+       title="拖我 = 改报告带高度（双击复位）"></div>
+  <div id="report" class="pane collapsed">
+    <div class="zhead" id="rep-head" title="点这里收起 / 展开报告带">
+      <span class="caret" id="rep-caret" data-open="false" data-ico="chevron"></span>报告 / 警告
+      <span class="grow"></span>
+      <span class="hint" id="rep-brief"></span>
+      <span class="hint" id="rep-tip">点标题展开 · 拖分隔条调高</span>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div id="status" class="status">（等待加载文件）</div>
+    <details id="more">
+      <summary>时序 / 警告 <span id="warn-badge" class="badge2"></span></summary>
+      <div id="timing" class="timing"></div>
+      <div id="warnings" class="warnings"></div>
+    </details>
+  </div>
+</div>
+
+<audio id="player" preload="auto"></audio>
+
+<div id="toast"></div>
+
+<div id="progress" class="hidden">
+  <div class="pbar"><div id="pfill"></div></div>
+  <div class="ptext"><span id="ptext">准备中…</span>
+    <button id="pcancel" class="ghost">取消</button></div>
+</div>
+
+<div id="modal" class="hidden">
+  <div class="card">
+    <h3 id="m-title">参数说明</h3>
+    <pre id="m-body"></pre>
+    <div class="row right"><button id="m-close" class="primary">知道了</button></div>
+  </div>
+</div>
+
+<!-- ▼▼ WebView2 宿主桥：必须在 app.js 之前同步执行（固化 window.dsh.base） ▼▼ -->
+<!-- Fluent 图标 sprite + 材质过场：也必须在 app.js 之前 —— 那边会直接调 window.ShellUI。 -->
+<script src="../shell-ui.js"></script>
+<script src="__dsh_bridge.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

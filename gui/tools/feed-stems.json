@@ -1,0 +1,12 @@
+{
+  "type": "stems",
+  "job": "<REPO>/output/.work/FallenEra_1789790176",
+  "items": [
+    { "name": "input_bass.wav",   "path": "<REPO>/output/.work/FallenEra_1789790176/stems/input_bass.wav" },
+    { "name": "drums.wav",        "path": "<REPO>/output/.work/FallenEra_1789790176/stems/drums.wav" },
+    { "name": "guitar.wav",       "path": "<REPO>/output/.work/FallenEra_1789790176/stems/guitar.wav" },
+    { "name": "instrumental.wav", "path": "<REPO>/output/.work/FallenEra_1789790176/stems/instrumental.wav" },
+    { "name": "other.wav",        "path": "<REPO>/output/.work/FallenEra_1789790176/stems/other.wav" },
+    { "name": "piano.wav",        "path": "<REPO>/output/.work/FallenEra_1789790176/stems/piano.wav" }
+  ]
+}

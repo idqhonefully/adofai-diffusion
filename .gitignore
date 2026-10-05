@@ -55,3 +55,6 @@ Thumbs.db
 
 # ===== node =====
 node_modules/
+
+# ===== 仓库相对 NuGet 包缓存（由 Directory.Build.props 指定，避免污染 C 盘）=====
+.nuget-packages/

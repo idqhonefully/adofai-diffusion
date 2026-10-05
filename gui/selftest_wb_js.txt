@@ -1,0 +1,143 @@
+(function(){
+  // ★ 探针必须**等界面真建好**再动手：sidecar 冷启动时页面 main() 还在 await
+  //   （health → schema → buildPanels），这时点按钮只会点到空气。
+  //   所以：ready() 轮询到组/桥都在位才跑；没跑完 __domProbe 返回 'PENDING'，
+  //   宿主看到 PENDING 会 1 秒后重探（见 gui_main.py ScriptDone）。
+  var errs = [];
+  window.onerror = function(m,s,l,c){ errs.push((s||'')+':'+l+':'+c+' '+m); };
+  var layout = [], show = [], br = {};
+  var done = false;
+
+  function ready(){
+    var g = document.getElementById('groups');
+    // ★ 必须等谱面真正载入：rebuild 成功会置 window.__chartReady=true（见 app.js）。
+    //   否则 addShowSegment 读到 null payload、n_floors 取不到，方块号夹回测试会假阴性。
+    var loaded = !!window.__chartReady;
+    return !!(g && g.querySelector('section.grp') && document.getElementById('br-url')) && loaded;
+  }
+
+  function run(){
+    if (done || !ready()) return;
+    done = true;
+
+    // ── 验证点 1：③b 采bpm 不得再单开面板/浮窗 ──
+    var sep = document.getElementById('right-xk') || document.getElementById('groups-xk') || document.getElementById('xk-float');
+    layout.push('no_separate_pane=' + (sep ? ('FAIL:' + sep.id) : 'ok'));
+
+    // ── 验证点 2：组必须都在检查器 #groups 内，且按 schema 顺序排列 ──
+    var insp = document.getElementById('groups');
+    var order = Array.prototype.map.call(insp.querySelectorAll('section.grp'),
+                  function(s){ return s.dataset.g; });
+    layout.push('inspector_order=' + order.join('>'));
+    layout.push('group_count=' + order.length);
+    var sec = insp.querySelector('section[data-g="xk"]');
+    layout.push('xk_in_inspector=' + (sec ? 'ok' : 'FAIL'));
+    if (sec) {
+      var h4 = sec.querySelector('h4');
+      layout.push('xk_title=' + (h4 ? h4.textContent.replace(/\s+/g, ' ').trim() : ''));
+      layout.push('xk_controls=' + sec.querySelectorAll('select,input,button').length);
+      layout.push('xk_visible=' + (sec.offsetWidth > 0 && sec.offsetHeight > 0 ? 'ok' : 'FAIL'));
+      if (h4) {
+        try {
+          h4.ondblclick();
+          layout.push('collapse1=' + (sec.classList.contains('collapsed') ? 'collapsed' : 'open'));
+          h4.ondblclick();
+          layout.push('collapse2=' + (sec.classList.contains('collapsed') ? 'collapsed' : 'open'));
+        } catch (e) { layout.push('collapse_ERR:' + e); }
+      }
+      try {
+        var btns = sec.querySelectorAll('button');
+        var add = null, clr = null;
+        for (var i = 0; i < btns.length; i++) {
+          if (btns[i].textContent.indexOf('加区间') >= 0) add = btns[i];
+          if (btns[i].textContent.trim() === '清空') clr = btns[i];
+        }
+        var list = document.getElementById('lst-xk');
+        if (add) { add.click(); layout.push('xk_add:' + (list ? list.children.length : 'nolist')); }
+        if (clr) { clr.click(); layout.push('xk_clr:' + (list ? list.children.length : 'nolist')); }
+      } catch (e) { layout.push('xk_range_ERR:' + e); }
+    }
+
+    // ── 验证点 3：⑤d 演出分段编辑器（原版：2 个按钮 + 可编辑分段列表）──
+    show.push('show_group=' + (insp.querySelector('section[data-g="show"]') ? 'ok' : 'FAIL'));
+    show.push('lbl_show=' + (document.getElementById('lbl-show') ? 'ok' : 'FAIL'));
+    var bSA = document.getElementById('btn-show-add'), bSC = document.getElementById('btn-show-clear');
+    var lstShow = document.getElementById('lst-show');
+    show.push('btn_add=' + (bSA ? bSA.textContent.trim() : 'FAIL'));
+    show.push('btn_clear=' + (bSC ? bSC.textContent.trim() : 'FAIL'));
+    show.push('list=' + (lstShow ? 'ok' : 'FAIL'));
+    try {
+      bSA.click();
+      show.push('after_add1_rows=' + (lstShow ? lstShow.children.length : '?'));
+      bSA.click();
+      show.push('after_add2_rows=' + (lstShow ? lstShow.children.length : '?'));
+      var r0 = lstShow ? lstShow.children[0] : null;
+      show.push('row0_title=' + (r0 && r0.querySelector('.rname') ? r0.querySelector('.rname').textContent.trim() : '?'));
+      show.push('row0_lo=' + (document.getElementById('inp-show-lo-0') ? document.getElementById('inp-show-lo-0').value : '?'));
+      show.push('row0_hi=' + (document.getElementById('inp-show-hi-0') ? document.getElementById('inp-show-hi-0').value : '?'));
+      show.push('row1_lo=' + (document.getElementById('inp-show-lo-1') ? document.getElementById('inp-show-lo-1').value : '?'));
+      var smI = document.getElementById('sel-show-in_move-0'), smO = document.getElementById('sel-show-out_move-0');
+      show.push('row0_in_opts=' + (smI ? smI.options.length : '?'));
+      show.push('row0_out_opts=' + (smO ? smO.options.length : '?'));
+      if (smO) { smO.value = '出D'; smO.onchange(); show.push('row0_out_set=' + smO.value); }
+      var inp0 = document.getElementById('inp-show-lo-0');
+      if (inp0) {
+        inp0.value = '99999'; inp0.onchange();
+        // ★ 关键：onchange 里会 renderShowSegments() → box.innerHTML='' 重建整行，
+        //   旧节点 inp0 已游离、读它只会拿到手填的 99999（假阴性）。
+        //   必须重新按 id 查「重建后」的输入框才是真实夹回结果。
+        var inp0b = document.getElementById('inp-show-lo-0');
+        show.push('clamp_lo=' + (inp0b ? inp0b.value : '?'));
+        var stEl = document.getElementById('status');
+        show.push('clamp_msg=' + (stEl && stEl.textContent ? stEl.textContent.trim().slice(0, 26) : ''));
+      }
+      r0 = lstShow ? lstShow.children[0] : null;
+      var d0 = r0 ? r0.querySelector('.rdel') : null;
+      if (d0) { d0.click(); show.push('after_del_rows=' + (lstShow ? lstShow.children.length : '?')); }
+      bSC.click();
+      show.push('after_clear_rows=' + (lstShow ? lstShow.children.length : '?'));
+      show.push('empty_hint=' + (lstShow && lstShow.children[0] ? lstShow.children[0].textContent.slice(0, 20) : '?'));
+    } catch (e) { show.push('show_ERR:' + e); }
+    // ⑤b / ⑤c 的两行短句
+    show.push('lbl_color=' + (document.getElementById('lbl-color') ? 'ok' : 'FAIL'));
+    show.push('lbl_appear=' + (document.getElementById('lbl-appear') ? 'ok' : 'FAIL'));
+
+    // ★ 诊断：探针到底看到了什么（不依赖 app.js 内部钩子）
+    var th2 = document.getElementById('tab-hint');
+    var st2 = document.getElementById('status');
+    show.push('diag_tabhint=' + (th2 ? th2.textContent.slice(0, 24) : 'NULL'));
+    show.push('diag_status_ceng=' + (st2 && st2.textContent.indexOf('层') >= 0 ? 'yes' : 'no'));
+    show.push('diag_chartready=' + String(window.__chartReady));
+    show.push('diag_nf=' + String(window.__nFloors));
+
+    // ── 验证点 4：右栏宽度 + 舞台宽度 ──
+    var rcol = document.getElementById('rcol'), stage = document.getElementById('stage');
+    layout.push('rcol_w=' + (rcol ? Math.round(rcol.getBoundingClientRect().width) : 'null'));
+    layout.push('stage_w=' + (stage ? Math.round(stage.getBoundingClientRect().width) : 'null'));
+
+    // ── 验证点 5：BDG 桥面板仍在（左栏）──
+    var brIds = ['br-dot','br-url','br-status','br-host','br-hoststop','br-push','br-pull','br-backuse','br-backclear','br-copy'];
+    brIds.forEach(function(id){ br[id] = !!document.getElementById(id); });
+    try { var bc = document.getElementById('br-copy'); if (bc) bc.click(); } catch (e) { errs.push('br-copy:' + e); }
+  }
+
+  // 就绪轮询：最多等 150 秒（sidecar 冷启动 + 首次 import 可能要 1 分钟）
+  var t0 = Date.now();
+  var timer = setInterval(function(){
+    if (ready() || Date.now() - t0 > 150000) { clearInterval(timer); run(); }
+  }, 500);
+
+  window.__domProbe = function(){
+    if (!done) return 'PENDING(等待界面就绪 ' + Math.round((Date.now() - t0) / 1000) + 's)';
+    var brStatus = document.getElementById('br-status');
+    var brUrl = document.getElementById('br-url');
+    return JSON.stringify({
+      layout: layout,
+      show: show,
+      bridge_present: br,
+      br_status: brStatus ? brStatus.textContent : null,
+      br_url: brUrl ? brUrl.textContent : null,
+      errors: errs
+    });
+  };
+})();

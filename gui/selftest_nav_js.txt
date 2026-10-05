@@ -1,0 +1,24 @@
+(function(){
+  var errs = [];
+  window.onerror = function(m,s,l,c){ errs.push((s||'')+':'+l+':'+c+' '+m); };
+  var order = ['generate','workbench','separate','history','settings','about','generate'];
+  var results = [];
+  order.forEach(function(p){
+    var nav = document.querySelector('#sidebar .nav[data-page="'+p+'"]');
+    if(!nav){ results.push(p+':NO_NAV'); return; }
+    try { nav.click(); } catch(e){ results.push(p+':CLICK_ERR:'+e); return; }
+    var page = document.querySelector('#main .page.active');
+    var ok = page && page.id === 'page-'+p;
+    results.push(p+':'+(ok?'ok':'WRONG('+(page?page.id:'none')+')'));
+  });
+  var g = document.querySelector('#sidebar .nav[data-page="generate"]'); if(g) g.click();
+  window.__domProbe = function(){
+    return JSON.stringify({
+      nav_cycle: results,
+      final_nav: (document.querySelector('#sidebar .nav.active')||{getAttribute:function(){return '?'}}).getAttribute('data-page'),
+      final_page: (document.querySelector('#main .page.active')||{id:'?'}).id,
+      sideFoot: document.getElementById('sideFoot').textContent,
+      errors: errs
+    });
+  };
+})();

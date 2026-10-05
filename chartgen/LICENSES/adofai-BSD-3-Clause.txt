@@ -1,0 +1,53 @@
+adofai（npm 包）· 许可与来源说明
+================================================
+
+包名 / 版本 : adofai@3.3.2
+声明许可    : BSD-3-Clause
+来源仓库    : https://github.com/Xbodwf/ADOFAI-JS
+本程序里的位置 : app/renderer/vendor/adofai-player.js（打包后的 bundle，内含本包）
+
+★ 如实记录一件事（不是我们偷懒，是上游没给）：
+  这个包的 npm 元数据声明了 `"license": "BSD-3-Clause"`，但
+    · 它的 **npm 包里没有自带 LICENSE 文件**（只有一个 regenerator-runtime 的
+      声明文件，见同目录 regenerator-runtime-MIT.txt）；
+    · 它的 **GitHub 仓库根目录也没有 LICENSE 文件**
+      （2026-10 用 api.github.com 核过，`license` 字段为空）。
+  所以「版权行」我们**没有权威文本可抄**。下面按 BSD-3-Clause 的标准文本附上，
+  版权行写作 `ADOFAI-JS contributors (@Xbodwf)`（据来源仓库所有者推定）。
+  若上游日后补了 LICENSE，**以它为准**，把这份换掉即可。
+
+元数据出处（可复核）：
+  https://registry.npmjs.org/adofai/3.3.2      → "license": "BSD-3-Clause"
+  https://api.github.com/repos/Xbodwf/ADOFAI-JS → 无 license 字段
+
+
+BSD 3-Clause License
+------------------------------------------------
+
+Copyright (c) 2026, ADOFAI-JS contributors (@Xbodwf)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.

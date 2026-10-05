@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>BsrInference</AssemblyName>
+    <RootNamespace>AdofaiStudio.BsrInference</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ONNX 推理：C# 侧替代 Python 的 onnxruntime。CPU 包做 POC 等价性验证，
+         生产换 Microsoft.ML.OnnxRuntime.Gpu 即可走 CUDA EP（与现管线同 VRAM 行为）。 -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>AdofaiOrt</AssemblyName>
+    <RootNamespace>AdofaiStudio.BsrInference</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 标准 CPU 托管包装：ORT 1.30 的 .NET 托管包装（Microsoft.ML.OnnxRuntime.Managed）
+         在 CPU/GPU 原生包间共用同一份，CUDA 启用与否完全由【原生 dll】决定，与托管包无关。
+         因此保留 CPU 托管包即可；CUDA 原生 dll 由下方 DeployCudaNative 目标从 venv 的
+         onnxruntime_gpu 包拷入（那份基库是带 ORT_USE_CUDA 的真·CUDA 版）。 -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.30.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BsrInference\BsrInference.csproj" />
+  </ItemGroup>
+
+  <!-- ===== CUDA 原生 dll 部署（使 C# 推理能跑 GPU）=====
+       根因：ORT 1.30 的 .NET 托管包装从 $(OutDir)runtimes/win-x64/native/ 优先加载原生
+       onnxruntime.dll；NuGet 的 Microsoft.ML.OnnxRuntime（CPU 包）拷进去的是纯 CPU 基库
+       → 报 "CUDA execution provider is not enabled in this build"。
+       解法：构建后从 venv 的 onnxruntime_gpu 包拷贝【真·CUDA 版】原生 dll 覆盖之。
+       来源目录可用 msbuild 属性 OrtCudaNativeDir / CudaRuntimeDir / CudnnRuntimeDir 覆盖。 -->
+  <PropertyGroup>
+    <OrtCudaNativeDir Condition="'$(OrtCudaNativeDir)'==''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)/../../../audio-sep/venv/Lib/site-packages/onnxruntime/capi'))</OrtCudaNativeDir>
+    <CudaRuntimeDir    Condition="'$(CudaRuntimeDir)'==''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)/../../../audio-sep/venv/Lib/site-packages/nvidia/cu13/bin/x86_64'))</CudaRuntimeDir>
+    <CudnnRuntimeDir   Condition="'$(CudnnRuntimeDir)'==''">$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)/../../../audio-sep/venv/Lib/site-packages/nvidia/cudnn/bin'))</CudnnRuntimeDir>
+  </PropertyGroup>
+
+  <Target Name="DeployCudaNative" AfterTargets="Build;Publish">
+    <PropertyGroup>
+      <_haveCuda>false</_haveCuda>
+      <_haveCuda Condition="Exists('$(OrtCudaNativeDir)/onnxruntime_providers_cuda.dll')">true</_haveCuda>
+    </PropertyGroup>
+
+    <Message Condition="!$(_haveCuda)" Importance="high"
+             Text="WARNING [DeployCudaNative]: 未找到 CUDA 原生 dll（$(OrtCudaNativeDir)）。C# 将仅能 CPU 推理；设置 OrtCudaNativeDir 指向 onnxruntime_gpu 的 capi 目录可启用 GPU。" />
+
+    <ItemGroup Condition="$(_haveCuda)">
+      <_ortCudaNative Include="$(OrtCudaNativeDir)/onnxruntime.dll" />
+      <_ortCudaNative Include="$(OrtCudaNativeDir)/onnxruntime_providers_cuda.dll" />
+      <_ortCudaNative Include="$(OrtCudaNativeDir)/onnxruntime_providers_shared.dll" />
+      <_ortCudaNative Include="$(OrtCudaNativeDir)/onnxruntime_providers_tensorrt.dll" />
+      <_cudaRt   Include="$(CudaRuntimeDir)/*.dll" />
+      <_cudnnRt  Include="$(CudnnRuntimeDir)/*.dll" />
+    </ItemGroup>
+
+    <!-- 基库 + providers 同时覆盖「根」与「runtimes/win-x64/native」，确保两种加载路径都拿到 CUDA 版 -->
+    <Copy Condition="$(_haveCuda)" SourceFiles="@(_ortCudaNative)"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="$(_haveCuda)" SourceFiles="@(_ortCudaNative)"
+          DestinationFolder="$(OutDir)runtimes/win-x64/native" SkipUnchangedFiles="true" />
+    <!-- CUDA 运行时（cudart/cublas/cudnn/nvrtc）：放进根目录，providers_cuda.dll 加载时沿 app 基目录即可找到 -->
+    <Copy Condition="$(_haveCuda)" SourceFiles="@(_cudaRt)"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+    <Copy Condition="$(_haveCuda)" SourceFiles="@(_cudnnRt)"
+          DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+
+    <Message Condition="$(_haveCuda)" Importance="high"
+             Text="[DeployCudaNative] 已部署 CUDA 原生 dll → $(OutDir)（基库+providers_cuda+CUDA运行时）" />
+  </Target>
+
+</Project>
