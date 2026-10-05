@@ -49,7 +49,7 @@ python backend.py            # 起本地 HTTP（端口见实现；默认 8766）
 # 浏览器打开 http://127.0.0.1:8766/index.html
 ```
 
-### 2.2 C# 桌面壳
+### 2.2 C# 桌面壳 
 
 ```
 cd app-cs
