@@ -5,7 +5,7 @@
 
 - 桌面壳：**C# / .NET 10 + WPF + WebView2**，承载前端并拉起 Python 管线；
 - 前端 / 工作台：**Web**（HTML + JS），负责导入、试听、预览、编辑；
-- 音频管线：**Python** —— 音源分离（BS-Roformer / Demucs）→ onset 检测（ONNX）→ 谱面生成；
+- 音频管线：**Python** —— 音源分离（BS-Roformer）→ onset 检测（ONNX）→ 谱面生成；
 - `chartgen/`：**联合开发的 fork**（LINIX099/adofai-chart-generator，MIT），提供 sidecar 与核心算法。
 
 **版本** 见 `VERSION` · `CHANGELOG.md`。
