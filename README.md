@@ -1,6 +1,6 @@
 # ADOFAI-Studio
 
-把 **歌曲音频 / MIDI / 时间戳** 变成 **A Dance of Fire and Ice（冰与火之舞）** 的可游玩谱面
+把 **歌曲音频（ogg/mp3）** 变成 **A Dance of Fire and Ice（冰与火之舞）** 的可游玩谱面
 （`.adofai`），并能**立刻在浏览器里看见、听见采音对不对**。
 
 - 桌面壳：**C# / .NET 10 + WPF + WebView2**，承载前端并拉起 Python 管线；
